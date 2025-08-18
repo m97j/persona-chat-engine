@@ -77,8 +77,8 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 ## 📊 모델 설계 및 학습 (train/)
 
-* Colab Notebook: [Train Model on Colab]([https://colab.research.google.com/...](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing))
-* Hugging Face Model: [HF Model]([https://huggingface.co/my-model](https://huggingface.co/spaces/m97j/PersonaChatEngine))
+* Colab Notebook:  [Train Model on Colab](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
+* Hugging Face Model: [HF Model](https://huggingface.co/spaces/m97j/PersonaChatEngine)
 
 ## 🛠 모델 기능
 
