@@ -60,7 +60,7 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 ### 역할
 
 * **모델 호스팅:** Fine-tuned된 모델과 LoRA 어댑터를 호스팅하여 추론 서비스 제공
-* **API 엔드포인트:** 게임 서버의 요청을 처리할 수 있는 RESTful API 엔드포인트 제공
+* **API 엔드포인트:** AI 서버의 요청을 처리할 수 있는 RESTful API 엔드포인트 제공
 
 ### 구성 요소
 
@@ -77,8 +77,8 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 ## 📊 모델 설계 및 학습 (train/)
 
-* Colab Notebook: [Train Model on Colab](https://colab.research.google.com/...)
-* Hugging Face Model: [HF Model](https://huggingface.co/my-model)
+* Colab Notebook: [Train Model on Colab]([https://colab.research.google.com/...](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing))
+* Hugging Face Model: [HF Model]([https://huggingface.co/my-model](https://huggingface.co/spaces/m97j/PersonaChatEngine))
 
 ## 🛠 모델 기능
 
