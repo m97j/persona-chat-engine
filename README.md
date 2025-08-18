@@ -15,11 +15,16 @@
 
 ## ⚙️ 아키텍처
 ```mermaid
-1. **Game Server** → 플레이어 대사 입력
-2. **AI Server (Preprocess)** → 조건 검증
-3. **HF-Serve** → 모델 추론 (persona, npc_id 반영)
-4. **AI Server (Postprocess)** → 윤리 필터링 / delta 값 추출
-5. **Game Server** → 대사 전송 + 상태 업데이트
+graph TD
+Client[Unity Client] --input text--> GameServer[Node.js Game Server]
+GameServer[Node.js Game Server] --ask ai--> AIServer[python AI Server]
+AIServer[python AI Server] <--> Preprocess
+AIServer[python AI Server] --prompt--> HF-Serve[HuggingFaceSpaces]
+HF-Serve[HuggingFaceSpaces] --> inference
+HF-Serve[HuggingFaceSpaces] --result--> AIServer[python AI Server]
+AIServer[python AI Server] <--> Postprocess
+AIServer[python AI Server] --npc text, deltas, flags--> GameServer[Node.js Game Server]
+GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 ```
 
 ---
