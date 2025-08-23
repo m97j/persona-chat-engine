@@ -1,0 +1,41 @@
+[
+  {
+    "id": "npc1:not_started:trigger",
+    "npc_id": "ella_herbalist",
+    "quest_stage": "not_started",
+    "trigger": {
+      "text": ["jason", "help"],
+      "item": ["old_scroll"],
+      "player_action": ["talked_to_guard"]
+    },
+    "description": "ella_herbalist은 퀘스트 시작 전, 플레이어가 'jason'이라는 이름을 언급하고 'old_scroll' 아이템을 보유하며 경비병과 대화한 경우, 퀘스트를 시작할 수 있다.",
+    "action": "start_quest",
+    "flag": ["env_change", "quest_trigger"]
+  },
+  {
+    "id": "npc1:in_progress:trigger",
+    "npc_id": "ella_herbalist",
+    "quest_stage": "in_progress",
+    "trigger": {
+      "text": ["key", "open"],
+      "item": ["magic_key"],
+      "player_action": ["unlocked_door"]
+    },
+    "description": "ella_herbalist은 퀘스트 진행 중, 플레이어가 'magic_key'를 사용해 문을 열면 다음 단계로 진행된다.",
+    "action": "advance_quest",
+    "flag": ["give_item", "env_change"]
+  },
+  {
+    "id": "npc2:not_started:trigger",
+    "npc_id": "tomson",
+    "quest_stage": "not_started",
+    "trigger": {
+      "text": ["lost", "map"],
+      "item": ["broken_compass"],
+      "player_action": ["entered_forest"]
+    },
+    "description": "tomson은 플레이어가 숲에 들어가고 'broken_compass'를 가진 상태에서 길을 잃었다는 표현을 하면 도움을 준다.",
+    "action": "give_hint",
+    "flag": ["dialogue_branch"]
+  }
+]

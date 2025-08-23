@@ -1,103 +1,113 @@
-# ai-server/app.py
-import os, json, logging, asyncio
 from fastapi import FastAPI, Request, HTTPException
-from pydantic import BaseModel
-import httpx
+from fastapi.middleware.cors import CORSMiddleware
+from manager.dialogue_manager import handle_dialogue
+from rag.rag_generator import chroma_initialized, load_game_docs_from_disk, add_docs
+from contextlib import asynccontextmanager
+from models.model_loader import load_emotion_model, load_fallback_model, load_embedder
+from .schemas import AskReq, AskRes
 
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("ai-server")
 
-HF_SERVE_BASE = os.getenv("LOCAL_HF_URL", "http://hf-serve:5000")
-HF_TIMEOUT = float(os.getenv("HF_TIMEOUT", "20"))
+EMOTION_MODEL_NAME = "Jinuuuu/KoELECTRA_fine_tunninge_emotion"
+FALLBACK_MODEL_NAME = "nlpai-lab/kullm-polyglot-5.8b-v2"
+EMBEDDER_MODEL_NAME = "all-MiniLM-L6-v2"
+EMOTION_MODEL_DIR = "./models/emotion-classification-model"
+FALLBACK_MODEL_DIR = "./models/fallback-npc-model"
+EMBEDDER_MODEL_DIR = "./models/sentence-embedder"
 
-app = FastAPI(title="ai-server")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Emotion
+    emo_tokenizer, emo_model = load_emotion_model(EMOTION_MODEL_NAME, EMOTION_MODEL_DIR)
+    app.state.emotion_tokenizer = emo_tokenizer
+    app.state.emotion_model = emo_model
 
-# simple config load
-with open("npc_config.json", "r", encoding="utf-8") as f:
-    NPCS = json.load(f)
+    # Fallback
+    fb_tokenizer, fb_model = load_fallback_model(FALLBACK_MODEL_NAME, FALLBACK_MODEL_DIR)
+    app.state.fallback_tokenizer = fb_tokenizer
+    app.state.fallback_model = fb_model
 
-# helper to call local hf-serve
-async def call_hf(endpoint: str, payload: dict):
-    url = HF_SERVE_BASE.rstrip("/") + endpoint
-    async with httpx.AsyncClient(timeout=HF_TIMEOUT) as client:
-        r = await client.post(url, json=payload)
-        r.raise_for_status()
-        return r.json()
+    # Embedder
+    embedder = load_embedder(EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR)
+    app.state.embedder = embedder
 
-# preprocess: rule-based (optionally extend)
-async def preprocess(session_id, npc_id, text, context):
-    # quick rule filter (mirrors hf-serve fallback)
-    triggers = {"grief": ["아이", "죽", "사라졌", "잃"], "anger": ["죽여", "복수"]}
-    for k, kws in triggers.items():
-        if any(kw in text for kw in kws):
-            return {"trigger": k, "source": "rule", "confidence": 0.95}
-    # if local hf-serve has preprocess model, call it
-    try:
-        resp = await call_hf("/predict_preprocess", {"session_id": session_id, "npc_id": npc_id, "text": text, "context": context})
-        return resp
-    except Exception as e:
-        logger.info("preprocess hf call failed or not present: %s", e)
-        return {"trigger": None, "confidence": 0.1, "source": "fallback"}
+    print(" 모든 모델 로딩 완료")
 
-# postprocess: call hf-serve postprocess or apply simple rules
-async def postprocess(session_id, npc_id, generated_text, constraints):
-    try:
-        resp = await call_hf("/predict_postprocess", {"session_id": session_id, "npc_id": npc_id, "text": generated_text, "constraints": constraints})
-        return resp
-    except Exception as e:
-        logger.info("postprocess hf call failed or not present: %s", e)
-        # local simple cleaner
-        if constraints.get("no_violence") and ("죽여" in generated_text or "kill" in generated_text):
-            cleaned = generated_text.replace("죽여", "[삭제]").replace("kill", "[redacted]")
-            return {"text": cleaned, "valid": False, "meta": {"cleaned": True}}
-        return {"text": generated_text, "valid": True, "meta": {}}
+    # RAG 초기화
+    if not chroma_initialized():
+        docs = load_game_docs_from_disk("./rag/docs")
+        add_docs(docs)
+        print(f"✅ RAG 문서 {len(docs)}개 삽입 완료")
+    else:
+        print("🔄 RAG DB 이미 초기화됨")
 
-@app.post("/ask")
-async def ask(request: Request):
-    body = await request.json()
-    session_id = body.get("session_id")
-    npc_id = body.get("npc_id")
-    user_input = body.get("user_input")
-    context = body.get("context", {})
+    yield  # 앱 실행
 
-    if not (session_id and npc_id and user_input):
+    print("🛑 서버 종료 중...")
+
+app = FastAPI(title="ai-server", lifespan=lifespan)
+
+# CORS 설정 (game-server에서 요청 가능하도록)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://fpsgame-rrbc.onrender.com"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+@app.post("/ask", response_model=AskRes)
+async def ask(request: Request, req: AskReq):
+    context = req.context or {}
+    npc_config = context.npc_config
+
+    if not (req.session_id and req.npc_id and req.user_input and npc_config):
         raise HTTPException(status_code=400, detail="missing fields")
-    if npc_id not in NPCS:
-        raise HTTPException(status_code=404, detail="unknown npc")
 
-    # 1) Preprocess rule/classify
-    pre = await preprocess(session_id, npc_id, user_input, context)
+    result = await handle_dialogue(
+        request=request,  
+        session_id=req.session_id,
+        npc_id=req.npc_id,
+        user_input=req.user_input,
+        context=context.dict(),
+        npc_config=npc_config.dict()
+    )
+    return result
 
-    # Option: if preprocess indicates immediate behavior (ignore/attack), return early
-    if pre.get("source") == "rule" and pre.get("trigger") == "ignore":
-        return {"npc_response": "...", "flags": {"trigger": "ignored"}}
+@app.post("/wake")
+async def wake(request: Request):
+    """
+    서버를 깨우기 위한 ping 엔드포인트.
+    game-server에서 호출됨.
+    """
+    body = await request.json()
+    session_id = body.get("session_id", "unknown")
+    print(f"📡 Wake signal received for session: {session_id}")
+    return {"status": "awake", "session_id": session_id}
 
-    # 2) Build prompt (can be enriched with short history, RAG results, persona)
-    persona = NPCS[npc_id]
-    system = f"Persona: {persona.get('persona_name')} - {persona.get('description')}"
-    prompt = f"{system}\nContext: {context}\nPreprocess: {pre}\nPlayer: {user_input}\nNPC:"
-
-    # 3) Call hf-serve main generate (prefer local main)
-    try:
-        main_resp = await call_hf("/predict_main", {"session_id": session_id, "npc_id": npc_id, "prompt": prompt, "max_tokens": 200})
-        generated = main_resp.get("text") if isinstance(main_resp, dict) else str(main_resp)
-    except Exception as e:
-        logger.exception("Failed to call /predict_main: %s", e)
-        # fallback simple response
-        generated = "..." 
-
-    # 4) postprocess (filter / rewrite)
-    constraints = {"no_violence": True}
-    post = await postprocess(session_id, npc_id, generated, constraints)
-
-    # 5) Decide flags (example: propagate preprocess trigger)
-    flags = {}
-    if pre.get("trigger"):
-        flags["trigger"] = pre["trigger"]
-
-    # Optionally: return delta values (emotion_delta etc.) in 'meta' for game-server to accumulate
-    meta = post.get("meta", {})
-    valid = post.get("valid", True)
-    npc_response = post.get("text", generated)
-
-    return {"npc_response": npc_response, "flags": flags, "valid": valid, "meta": meta}
+'''
+game-server 요청 구조 예시:
+{
+  "session_id": "abc123",
+  "npc_id": "npc_001",
+  "user_input": "안녕, 오늘 기분 어때?",
+  "context": {
+    "player_status": {
+      "level": 12,
+      "inventory": ["sword", "potion"],
+      "reputation": "neutral"
+    },
+    "game_state": {
+      "current_quest": "dragon_hunt",
+      "location": "village",
+      "time_of_day": "evening"
+    },
+    "npc_config": {
+      "name": "엘라",
+      "personality": "친절하고 조용함",
+      "backstory": "마을의 약초상으로, 과거에 용병이었던 경험이 있음",
+      "dialogue_style": "짧고 단정한 말투",
+      "relationship": "친구"
+    }
+  }
+}
+'''
