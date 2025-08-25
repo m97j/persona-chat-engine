@@ -4,15 +4,21 @@ from manager.dialogue_manager import handle_dialogue
 from rag.rag_generator import chroma_initialized, load_game_docs_from_disk, add_docs
 from contextlib import asynccontextmanager
 from models.model_loader import load_emotion_model, load_fallback_model, load_embedder
-from .schemas import AskReq, AskRes
+from schemas import AskReq, AskRes
+from pathlib import Path
 
 
-EMOTION_MODEL_NAME = "Jinuuuu/KoELECTRA_fine_tunninge_emotion"
-FALLBACK_MODEL_NAME = "nlpai-lab/kullm-polyglot-5.8b-v2"
-EMBEDDER_MODEL_NAME = "all-MiniLM-L6-v2"
-EMOTION_MODEL_DIR = "./models/emotion-classification-model"
-FALLBACK_MODEL_DIR = "./models/fallback-npc-model"
-EMBEDDER_MODEL_DIR = "./models/sentence-embedder"
+# 모델 이름
+EMOTION_MODEL_NAME = "tae898/emoberta-base-ko"
+FALLBACK_MODEL_NAME = "skt/ko-gpt-trinity-1.2B-v0.5"
+EMBEDDER_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+
+# 절대 경로 기준 모델 디렉토리 설정
+BASE_DIR = Path(__file__).resolve().parent  # ai_server/
+EMOTION_MODEL_DIR = BASE_DIR / "models" / "emotion-classification-model"
+FALLBACK_MODEL_DIR = BASE_DIR / "models" / "fallback-npc-model"
+EMBEDDER_MODEL_DIR = BASE_DIR / "models" / "sentence-embedder"
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -30,11 +36,12 @@ async def lifespan(app: FastAPI):
     embedder = load_embedder(EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR)
     app.state.embedder = embedder
 
-    print(" 모든 모델 로딩 완료")
+    print("✅ 모든 모델 로딩 완료")
 
     # RAG 초기화
+    docs_path = BASE_DIR / "rag" / "docs"
     if not chroma_initialized():
-        docs = load_game_docs_from_disk("./rag/docs")
+        docs = load_game_docs_from_disk(str(docs_path))
         add_docs(docs)
         print(f"✅ RAG 문서 {len(docs)}개 삽입 완료")
     else:
@@ -43,6 +50,7 @@ async def lifespan(app: FastAPI):
     yield  # 앱 실행
 
     print("🛑 서버 종료 중...")
+
 
 app = FastAPI(title="ai-server", lifespan=lifespan)
 
@@ -55,6 +63,7 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+
 @app.post("/ask", response_model=AskRes)
 async def ask(request: Request, req: AskReq):
     context = req.context or {}
@@ -64,7 +73,7 @@ async def ask(request: Request, req: AskReq):
         raise HTTPException(status_code=400, detail="missing fields")
 
     result = await handle_dialogue(
-        request=request,  
+        request=request,
         session_id=req.session_id,
         npc_id=req.npc_id,
         user_input=req.user_input,
@@ -73,16 +82,14 @@ async def ask(request: Request, req: AskReq):
     )
     return result
 
+
 @app.post("/wake")
 async def wake(request: Request):
-    """
-    서버를 깨우기 위한 ping 엔드포인트.
-    game-server에서 호출됨.
-    """
     body = await request.json()
     session_id = body.get("session_id", "unknown")
     print(f"📡 Wake signal received for session: {session_id}")
     return {"status": "awake", "session_id": session_id}
+
 
 '''
 game-server 요청 구조 예시:

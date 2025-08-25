@@ -1,11 +1,12 @@
 import os
 import json
-from chromadb import Client
-from chromadb.config import Settings
+
 from sentence_transformers import SentenceTransformer
 
 # 초기화
-client = Client(Settings(chroma_db_impl="duckdb+parquet", persist_directory="./chroma_db"))
+from chromadb import PersistentClient
+
+client = PersistentClient(path="./chroma_db")
 collection = client.get_or_create_collection(name="game_docs")
 embedder = SentenceTransformer("all-MiniLM-L6-v2")
 

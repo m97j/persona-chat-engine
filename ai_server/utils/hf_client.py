@@ -1,6 +1,6 @@
 import httpx
 from typing import Any, Dict
-from ..config import HF_SERVE_URL, HF_TIMEOUT
+from config import HF_SERVE_URL, HF_TIMEOUT
 
 async def _post(endpoint: str, payload: Dict[str, Any]) -> Dict[str, Any]:
     """
