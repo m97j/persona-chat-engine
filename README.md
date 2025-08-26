@@ -5,15 +5,45 @@
 
 
 ## 📌 개요
-**Persona Chat Engine**은 게임 내 NPC(Non-Player Character)와의 상호작용을 위한 AI 대화 엔진입니다.
-게임 플레이어의 선택과 행동, NPC 상태를 반영하여 자연스러운 대화와 퀘스트 진행을 생성하며, **Delta/Flag** 기반 행동 및 감정 변화를 모델링합니다.
+**Persona Chat Engine**은 게임 내 NPC(Non-Player Character)와의 상호작용을 위한 AI 대화 엔진입니다.  
+플레이어의 선택/행동, NPC 상태를 반영해 자연스러운 대사와 퀘스트 진행을 생성하며, **Delta/Flag** 기반의 상태 변화(신뢰·관계)와 이벤트 트리거를 함께 예측합니다.
 
-* **목표:** 게임 환경에서 몰입감 있는 AI NPC 대화와 퀘스트 반응 생성
-* **핵심 기술:** Transformer 기반 LLM, QLoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), 커스텀 프롬프트 포맷
+- **목표:** 게임 환경에서 몰입감 있는 AI NPC 대화와 퀘스트 반응 생성
+- **핵심 기술:** Transformer 기반 LLM, QLoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), 커스텀 프롬프트 포맷, RAG 기반 flag 해석
 
 ---
 
 ## ⚙️ 아키텍처
+
+### 모델 아키텍처
+```mermaid
+flowchart LR
+  subgraph Input
+    T[Tokens]
+    E[Tokenizer]
+  end
+  T --> E --> I[Token Embedding]
+  P[RoPE on Q,K]:::op
+  subgraph Block_xN
+    direction LR
+    RN1[RMSNorm]
+    MHA[Multi-Head Attention]:::op
+    ADD1[Residual Add]
+    RN2[RMSNorm]
+    FFN[SwiGLU Feed-Forward]:::op
+    ADD2[Residual Add]
+  end
+  I --> P --> RN1 --> MHA --> ADD1 --> RN2 --> FFN --> ADD2
+  subgraph Output
+    H[LM Head]
+    S[Softmax]
+  end
+  Block_xN --> H --> S
+
+  classDef op fill:#eef,stroke:#669,stroke-width:1px;
+```
+
+### 전체 프로젝트 구성
 ```mermaid
 graph TD
 Client[Unity Client] --input text--> GameServer[Node.js Game Server]
@@ -31,46 +61,115 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 ## ⚙️ AI 서버 (ai-server/)
 
-### 역할
+### 역할 & 데이터 흐름
 
-* **게임 서버와의 통신:** 플레이어의 발화와 상태 정보를 수신하고, 모델 추론을 위한 입력 데이터를 준비
-* **프롬프트 구성:** 게임 서버로부터 받은 데이터를 기반으로 모델에 입력할 프롬프트를 생성
-* **전처리:** 프롬프트의 포맷을 모델에 맞게 조정하고, 필요한 추가 정보를 삽입
-* **후처리:** 모델의 출력을 게임 서버가 처리할 수 있는 형식으로 변환
+1. **게임 서버 요청 수신(`app.py`)**
+
+   * 최소 입력만 와도 동작: `{ text, npc_id, player_id, ... }`
+   * 옵션: 게임 서버가 보낸 상태/컨텍스트가 부족하면 `rag/`에서 NPC 메타(예: `docs/npc_config.json`)를 조회해 보강
+2. **전처리/프롬프트 구성(`pipeline/preprocess.py`, `utils/context_parser.py`, `manager/prompt_builder.py`)**
+
+   * 태그/컨텍스트/플레이어 발화를 묶어 **모델 포맷**(`<SYS>`, `<CTX>`, `<PLAYER>`, `<NPC>`)으로 구성
+3. **추론 요청(`utils/hf_client.py`, `models/fallback_model.py`, `pipeline/generator.py`)**
+   * preprocess.py에서 통과하지 못한 input은 `models/fallback_model.py`에서 fallback text 생성
+   * preprocess.py에 통과한 input은 `pipeline/generator.py` 에서 payload구성
+   * 페이로드: `prompt`, `npc_id`, `persona_tags`, `gen_params`(temperature, max\_new\_tokens 등)
+   * HF Spaces의 `/predict_main` 으로 HTTP POST
+
+4. **후처리(`pipeline/postprocess.py`)**
+
+   * 모델 응답에서 \*\*대사 텍스트, delta(연속값), flag(이벤트)\*\*를 파싱/정규화
+   * 예: `flags`는 시그모이드+threshold, `delta`는 범위 클램프·라운딩
+5. **게임 서버 응답(`schemas.py`)**
+
+   * 표준화 JSON으로 반환
+
+   ```json
+   {
+     "text": "NPC의 대답...",
+     "delta": {"trust": 0.10, "relationship": 0.08},
+     "flags": {"give_item": true, "npc_main_story": false, "quest_stage_change": false},
+     "meta": {"npc_id": "mother_abandoned_factory"}
+   }
+   ```
+
+### 📁 디렉토리 구조
+
+```bash
+ai-server/
+├── app.py                  # FastAPI 엔트리포인트
+├── config.py               # 서버 설정 및 모델 경로 관리
+├── schemas.py              # 요청/응답 데이터 구조 정의
+├── requirements.txt        # 의존성 패키지 목록
+
+├── pipeline/               # 대화 흐름 처리 모듈
+│   ├── __init__.py
+│   ├── preprocess.py       # 입력 전처리 및 프롬프트 구성
+│   ├── postprocess.py      # 모델 출력 후처리 및 flag/delta 추출
+│   └── generator.py        # 모델 추론 요청 처리
+
+├── rag/                    # RAG 기반 flag 해석 모듈
+│   ├── __init__.py
+│   ├── rag_generator.py    # NPC별 상황에 따른 flag 텍스트 해석
+│   └── docs/
+│       └── npc_config.json # NPC별 flag 해석 기준 문서
+
+├── utils/                  # 유틸리티 모듈
+│   ├── __init__.py
+│   ├── hf_client.py        # Hugging Face API 통신 클라이언트
+│   └── context_parser.py   # 대화 맥락 파싱 및 구조화
+
+├── models/                 # 모델 로딩 및 fallback 처리
+│   └── model_loader.py     # 모델 로딩 유틸리티
+```
 
 ### 주요 모듈
 
-* **`dialogue_manager.py`:** 대화 흐름 관리 및 NPC 응답 생성
-* **`preprocess.py`:** 입력 데이터의 전처리 및 프롬프트 구성
-* **`postprocess.py`:** 모델 출력의 후처리 및 게임 서버와의 데이터 포맷 변환
-* **`hf_client.py`:** Hugging Face Spaces와의 통신을 위한 클라이언트 구현
+- **dialogue_manager.py**: 전체 대화 흐름을 제어하며, fallback 처리, 프롬프트 생성, 모델 추론, 후처리까지 담당
+- **preprocess.py**: 플레이어 입력과 NPC 상태를 기반으로 전처리
+- **postprocess.py**: 모델 출력에서 `<RESPONSE>`, `<FLAG>`, `<DELTA>` 태그를 파싱하고, RAG를 통해 flag를 텍스트로 해석
+- **rag_generator.py**: NPC ID, 퀘스트 단계, flag 이름을 기반으로 문서 검색 및 텍스트 반환
 
-### 데이터 흐름
 
-1. **게임 서버 요청 수신:** 플레이어의 발화와 상태 정보를 포함한 요청을 수신
-2. **프롬프트 생성:** `preprocess.py`를 통해 모델에 입력할 프롬프트를 생성
-3. **모델 추론:** `hf_client.py`를 사용하여 Hugging Face Spaces에 요청을 보내고 응답을 수신
-4. **후처리:** `postprocess.py`를 통해 응답을 게임 서버가 처리할 수 있는 형식으로 변환
-5. **게임 서버로 응답 전송:** 변환된 응답을 게임 서버로 전송하여 게임 상태를 업데이트
+### 🧩 RAG 기반 Flag 해석 흐름
+
+```mermaid
+graph TD
+ModelOutput["FLAG: give_item=0.92, npc_main_story=0.87"]
+ModelOutput --> Postprocess
+Postprocess --> RAG["retrieve(npc_id:quest_stage:flag_name)"]
+RAG --> FlagText["give_item → 금목걸이 지급"]
+FlagText --> GameServer
+```
+
+- 모델은 수치 기반 flag를 예측
+- `postprocess.py`는 RAG를 통해 해당 수치를 텍스트로 해석
+- 게임 서버는 이를 기반으로 실제 아이템 지급, 퀘스트 진행 등을 결정
 
 ---
 
 ## 🚀 Hugging Face Spaces (hf-serve/)
 
-### 역할
+* ### 역할
 
-* **모델 호스팅:** Fine-tuned된 모델과 LoRA 어댑터를 호스팅하여 추론 서비스 제공
-* **API 엔드포인트:** AI 서버의 요청을 처리할 수 있는 RESTful API 엔드포인트 제공
+* **모델 호스팅 + API 엔드포인트**
+
+  * Base LLM(Qwen2.5-3B-Instruct) + **LoRA 어댑터**를 로드해 추론
+  * **REST 엔드포인트** 제공: `POST /infer` → `{ text, delta[], flags{} }` JSON 반환
+* **Gradio UI(옵션)**
+
+  * 같은 Space에서 간단한 인터랙티브 테스트 UI 제공 (버튼·텍스트박스 기반)
 
 ### 구성 요소
 
 * **`server.py`:** FastAPI를 기반으로 한 RESTful API 서버 구현
-* **`model_utils.py`:** 모델 로딩 및 추론을 위한 유틸리티 함수
-* **`requirements.txt`:** 필요한 Python 패키지 목록
+* **`model_utils.py`:** 베이스 모델 + 어댑터 로딩, 토크나이즈/생성
+* **`requirements.txt`:** 필요한 Python 패키지 목록 [`transformers`, `peft`, `accelerate`, `fastapi`/`gradio`, 등]
 
 ### 배포
 
-* **Hugging Face Spaces:** `hf-serve/` 디렉토리의 코드를 Hugging Face Spaces에 배포하여 API 엔드포인트 제공
+* **[Hugging Face Spaces](https://huggingface.co/spaces/m97j/PersonaChatEngine):** `hf-serve/` 디렉토리의 코드를 Hugging Face Spaces에 배포하여 API 엔드포인트 제공
+* **[Hugging Face Hub](https://huggingface.co/m97j/npc_LoRA-fps):** LoRA Fine Tuning 한 adapter files를 배포하여 spaces에서 base model과 함게 로드 가능하도록 제공
 * **AI 서버 통합:** AI 서버는 해당 API 엔드포인트를 호출하여 NPC의 응답을 수신
 
 ---
@@ -86,6 +185,7 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 * 플레이어 발화(`player_utterance`)를 기반으로 NPC 응답 생성
 * NPC의 감정, 신뢰도, 관계 상태 등을 반영
+* 태그(감정/신뢰/관계/퀘스트 단계 등) 반영
 * 대화 맥락(`context`) 유지
 
 ### 2. 행동 및 상태 추적
@@ -136,119 +236,73 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 ### 4. QLoRA 기반 Fine-Tuning
 
-### 1. 모델 아키텍처
+#### **1) 모델 아키텍처**
 
 **Base Model:** Qwen2.5-3B-Instruct
 
 **Adapter:** LoRA 기반 4bit Quantization Adapter
 
-**멀티헤드 출력 구조:**
+**멀티헤드 아키텍처:**
 
-* **Delta Head:** NPC의 신뢰도(trust)와 관계도(relationship) 변화를 예측하는 회귀 모델
-* **Flag Head:** 퀘스트 진행 상태, 아이템 지급 여부 등 이벤트 트리거를 예측하는 이진 분류 모델
+* **LM Head**: 대사 텍스트 생성 (언어모델 표준 next-token)
+* **Delta Head**: 마지막 토큰 히든에서 `Linear(hidden, 2)` → *(trustΔ, relationshipΔ)*
+* **Flag Head**: `Linear(hidden, N_flags)` → 시그모이드 후 임계값으로 이벤트 on/off
 
-**학습 구성:**
+> **별도 헤드 추가한 이유:**
+> 대사는 **창의적 다양성**이 필요하고, Delta/Flag는 **결정적·정확성**이 중요합니다. 텍스트 내부에 `<DELTA ...>`를 넣어 학습하면 **LM Loss**에 종속되어 노이즈가 커지고 포맷 일탈에 취약합니다. 반면 **별도 회귀/분류 헤드**는 대사와 **독립적인 지도 신호**를 받아 안정적인 예측을 학습합니다.
+
+#### **2) 학습 구성:**
 
 * **Loss 함수:**
 
-  * **LM Loss:** 기존 언어 모델 학습 손실
-  * **Delta Loss (MSE):** 신뢰도 및 관계도 예측 오차
-  * **Flag Loss (BCE):** 이벤트 트리거 예측 오차
+* **LM Loss**: `CrossEntropy(ignore_index=-100)`
 
-* **Trainer 구현:**
+  * 프롬프트 토큰은 `-100`으로 마스킹(모델이 정답 토큰 위치만 학습)
+    
+* **Delta Loss (회귀)**: `MSELoss`
 
-  * `MultiHeadTrainer` 클래스를 통해 멀티헤드 출력을 처리
-  * 각 헤드의 출력에 대해 해당하는 손실을 계산하고 합산하여 최종 손실을 도출
+  * Δ값은 보통 `[-1, 1]` 범위의 **연속값** → 평균제곱오차가 적합
+  * **팁**: 레이블/예측을 `[-1, 1]`로 **클램프**하면 외란(outlier)에 안정
+  * (선택) 노이즈가 심하면 `HuberLoss(=SmoothL1)`로 교체 시 **강건성↑**
+    
+* **Flag Loss (다중 이진)**: `BCEWithLogitsLoss`
 
-```python
-class MultiHeadTrainer(Trainer):
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.pop("labels")
-        delta = inputs.pop("delta")
-        flag = inputs.pop("flag")
-        outputs = model(**inputs, output_hidden_states=True)
-        last_hidden = outputs.hidden_states[-1][:, -1, :]
-        lm_loss = nn.CrossEntropyLoss(ignore_index=-100)(outputs.logits.view(-1, outputs.logits.size(-1)), labels.view(-1))
-        delta_pred = model.delta_head(last_hidden)
-        mse_loss = nn.MSELoss()(delta_pred, delta)
-        flag_pred = model.flag_head(last_hidden)
-        bce_loss = nn.BCEWithLogitsLoss()(flag_pred, flag)
-        return lm_loss + mse_loss + bce_loss
-```
----
+  * 다중 이벤트의 **불균형**을 완화하려면 `pos_weight`로 양성 가중치 부여
+  * 임계값 기본 `0.5`, 이벤트별로 `0.3~0.7` **튜닝** 가능
+    
+* **총손실**: `L = L_lm + λΔ·L_mse + λF·L_bce`
 
-## 📂 디렉토리 구조
-```
+  * 기본은 1:1:1, 게임 요구(정확도 강조) 에 따라 `λΔ/λF`를 **상향** 가능
 
-persona-chat-engine/
-│
-├── ai-server/        # 대화 파이프라인 관리, 게임 서버와 통신
-│   ├── app.py
-│   ├── schemas.py
-│   ├── agent_manager.py
-│   ├── dialogue_manager.py
-│   ├── preprocess.py
-│   ├── postprocess.py
-│   ├── generator.py
-│   ├── rag.py
-│   ├── config.py
-│   ├── utils/
-│   │   ├── hf_client.py
-│   │   └── model_loader.py
-│   └── requirements.txt
-│
-├── hf-serve/         # Hugging Face 모델 추론 API
-│   ├── model_utils.py
-│   ├── server.py
-│   └── requirements.txt
-│
-├── train/            # (옵션) 모델 학습 관련 자료
-│   ├── README.md     # Colab 학습 링크
-│   └── dataset/      # (옵션) json 데이터 샘플
-│
-└── docker-compose.yml
-```
 
----
+#### **3) 전처리/토크나이즈 설계**
 
-## 📦 설치 및 실행
+* **포맷**:
 
-```bash
-git clone https://github.com/m97j/persona-chat-engine.git
-cd persona-chat-engine
-pip install -r requirements.txt
-```
+  ```
+  <SYS> ... TAGS ... FORMAT ... </SYS>
+  <CTX> ... 대화 이력 ... </CTX>
+  <PLAYER>사용자 발화
+  <NPC>
+  ```
+* **라벨 마스킹**: 프롬프트 부분은 `-100`으로 마스킹 → **정답 텍스트**만 학습
+* **Padding/Truncation**: 디코더 LM은 **right padding**이 안전, `MAX_LEN=1024`
+* **Delta/Flag는 텍스트 외부**의 별도 텐서로 제공 → 멀티헤드 학습에 직접 투입
 
-### 모델 로드
 
-```python
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
+#### **4) Trainer 구현:**
 
-base_model = "Qwen/Qwen2.5-3B-Instruct"
-adapter_path = "lora-output-jason-mom"
+* **4bit + QLoRA**: 메모리/속도 효율과 수렴성의 균형
+* **`target_modules=["q_proj","k_proj","v_proj","o_proj","gate_proj","up_proj","down_proj"]`**
 
-tokenizer = AutoTokenizer.from_pretrained(base_model)
-model = AutoModelForCausalLM.from_pretrained(base_model)
-model = PeftModel.from_pretrained(model, adapter_path)
-```
+  * Qwen/Mistral 계열에서 검증된 조합 → **표현력** 확보
+* **Optimizer**: `paged_adamw_32bit` (LoRA + 4bit 환경에서 안정적)
+* **LR 스케줄러**: `cosine + warmup_ratio=0.03` → 과적합/발산 방지
+* **Gradient Checkpointing + Accumulation**: VRAM 절감 + 유효 배치 ↑
+* **`output_hidden_states=True`**: 마지막 토큰 히든을 별도 헤드에 공급
 
-### 샘플 추론
 
-```python
-prompt = "<SYS> ... <CTX> ... </CTX> <PLAYER>저기요, Jason을 아시나요?\n<NPC>"
-inputs = tokenizer(prompt, return_tensors="pt")
-outputs = model.generate(**inputs, max_new_tokens=200)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-```
-
----
-## 📽 시연 영상
-
-(업데이트 예정)
----
-
-## 🖥 학습 환경
+### 🖥 학습 환경
 
 * **GPU:** NVIDIA A100 / Colab GPU
 * **Framework:** PyTorch + HuggingFace Transformers
@@ -261,29 +315,18 @@ print(tokenizer.decode(outputs[0], skip_special_tokens=True))
 
 ## 🎯 프로젝트 성과
 
-* NPC 신뢰도, 관계 상태, 퀘스트 이벤트 반영 대화 가능
-* QLoRA 기반 4bit Adapter 학습으로 효율적 학습 및 배포
-* Delta/Flag 헤드로 게임 내 이벤트 및 상태 변화를 동시에 처리
-* 포트폴리오용 데모 제공 가능
+- NPC 신뢰도, 관계 상태, 퀘스트 이벤트 반영 대화 가능
+- QLoRA 기반 4bit Adapter 학습으로 효율적 학습 및 배포
+- Delta/Flag 헤드로 게임 내 이벤트 및 상태 변화를 동시에 처리
+- RAG 기반 flag 해석으로 상황별 텍스트 응답 가능
 
 ---
 
 ## 📁 포트폴리오 연계
 
-* **FPS Game 프로젝트:** 게임 내 캐릭터 AI와 연동, 이벤트 발생 테스트
-* **Persona Chat Engine:** 대화 기반 스토리 전개, 멀티 NPC 관리
+* **[FPS Game](https://github.com/m97j/fpsgame)**: 이벤트 테스트 및 게임 루프 연계
+* **[Persona Chat Engine](https://github.com/m97j/persona-chat-engine)**: 멀티 NPC, 스토리/퀘스트 전개 파이프라인
 * 이 두 프로젝트는 통합적으로 플레이어 경험 설계와 AI NPC 구현 능력을 강조
 
 ---
-
-## 🔗 관련 링크
-
-* [Portfolio](https://www.github.com/m97j/portfolio)
-* [FPS Game](https://github.com/m97j/fpsgame)
-* [Persona Chat Engine](https://github.com/m97j/persona-chat-engine)
-
----
-
-
-
 
