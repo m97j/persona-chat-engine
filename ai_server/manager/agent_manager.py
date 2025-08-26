@@ -1,91 +1,90 @@
-from typing import Optional, List, Dict, Any
+from typing import List, Dict, Any
 from rag.rag_generator import retrieve
 
 class NPCAgent:
-    """
-    Persona 기반 프롬프트 빌더.
-    - NPC ID와 태그 기반으로 프롬프트를 구성
-    - 컨텍스트, 히스토리, RAG 문서, 상태 정보를 활용
-    - 메인 모델 학습 프롬프트 형식에 맞춰 출력
-    """
-    def __init__(self, npc_id: str, persona_tag: Optional[str] = None):
+    def __init__(self, npc_id: str):
         self.npc_id = npc_id
-        self.persona_tag = persona_tag or f"[NPC={npc_id}]"
 
     def to_prompt(
         self,
+        mode: str,
+        session_id: str,
         user_input: str,
-        short_history: List[Dict[str, str]],
-        context: Optional[Dict[str, Any]] = None,
-        npc_config: Optional[Dict[str, Any]] = None,
-        player_state: Optional[Dict[str, Any]] = None,
+        short_history: List[dict],
+        npc_config: dict,
+        player_state: dict,
+        game_state: dict,
+        fallback_style: dict = None
     ) -> str:
-        # 기본 상태값
-        quest_stage = player_state.get("stage", "unknown") if player_state else "unknown"
-        location = player_state.get("location", "unknown")
-        relationship = player_state.get("relationship", "neutral")
-        trust = player_state.get("trust", "0.5")
-        reputation = player_state.get("reputation", "average")
-        style = player_state.get("style", "neutral")
+        quest_stage = game_state.get("quest_stage") or npc_config.get("quest_stage", "unknown")
+        location = game_state.get("location") or player_state.get("location", "unknown")
+        filters = {"npc_id": self.npc_id, "location": location, "quest_stage": quest_stage}
+        query = f"{self.npc_id}:{location}:{quest_stage}:{mode}"
+
+        rag_docs = retrieve(query, filters)
+        rag_text = "\n".join(f"- {doc}" for doc in rag_docs)
+
         items = ",".join(player_state.get("items", []))
         actions = ",".join(player_state.get("actions", []))
-        trigger_matched = npc_config.get("trigger_matched", "")
-        action = npc_config.get("action", "none")
-        flags = npc_config.get("flags", "none")
+        ctx_text = "\n".join(f"{t['role']}: {t['text']}" for t in short_history)
 
-        # RAG 문서
-        query = f"{self.npc_id}:{quest_stage}:trigger"
-        filters = {"npc_id": self.npc_id}
-        retrieved_docs = retrieve(query, filters)
-        lore_text = "\n".join(f"- {doc.get('description', '')}" for doc in retrieved_docs)
-
-        # 컨텍스트
-        context_text = context.get("context", "") if context else ""
-
-        # <SYS> 블록
-        sys_block = f"""<SYS>
+        if mode == "main":
+            sys_block = f"""<SYS>
 NPC_ID={self.npc_id}
+SESSION_ID={session_id}
+<STATE/>
+LOCATION={location}
 QUEST_STAGE={quest_stage}
-PLAYER_STATE:
-  location={location}
-  relationship={relationship}
-  trust={trust}
-  npc_mood={npc_config.get("mood", "neutral")}
-  reputation={reputation}
-  style={style}
-  items={items}
-  actions={actions}
-  input="{user_input}"
-TRIGGER_MATCHED={trigger_matched}
-ACTION={action}
-FLAGS={flags}
-LORE:
-{lore_text}
+NPC_MOOD={npc_config.get("npc_mood","neutral")}
+RELATIONSHIP={npc_config.get("relationship","neutral")}
+TRUST={npc_config.get("trust","0.5")}
+PLAYER_REPUTATION={player_state.get("reputation","average")}
+STYLE={npc_config.get("style","neutral")}
+ITEMS={items}
+ACTIONS={actions}
 FORMAT:
   <RESPONSE>...</RESPONSE>
-  <DELTA mood="{npc_config.get("mood", "neutral")}" trust="{trust}" />
-  <FLAG relevance="high" />
+  <DELTA trust="..." relationship="..." />
+  <FLAG name="..." />
 </SYS>"""
+            rag_block = f"<RAG>\n{rag_text}\n</RAG>" if rag_text else "<RAG/>"
+            ctx_block = f"<CTX>\n{ctx_text}\n</CTX>" if ctx_text else "<CTX/>"
+            player_block = f"<PLAYER>{user_input}</PLAYER>\n<NPC>"
+            return f"{sys_block}\n{rag_block}\n{ctx_block}\n{player_block}"
 
-        # <CTX> 블록
-        ctx_block = f"<CTX>\n{context_text.strip()}\n</CTX>"
+        elif mode == "fallback":
+            instr = "조건 불충족. 스토리 진행은 하지 않고, 캐릭터 일관성을 유지하며 자연스럽게 응답하라."
+            if fallback_style:
+                s = fallback_style.get("style"); a = fallback_style.get("npc_action"); e = fallback_style.get("npc_emotion")
+                more = []
+                if s: more.append(f"대화 스타일={s}")
+                if a: more.append(f"NPC 행동={a}")
+                if e: more.append(f"NPC 감정={e}")
+                if more:
+                    instr += " " + "; ".join(more) + "."
 
-        # 히스토리 블록 (선택적으로 포함 가능)
-        history_block = ""
-        for h in short_history[-8:]:
-            role = "Player" if h.get("role") == "user" else "NPC"
-            history_block += f"{role}: {h.get('text', '')}\n"
+            return f"""
+<FALLBACK>
+NPC_ID={self.npc_id}
+SESSION_ID={session_id}
+LOCATION={location}
+QUEST_STAGE={quest_stage}
+MOOD={npc_config.get("npc_mood","neutral")}
+STYLE={npc_config.get("style","neutral")}
+ITEMS={items}
+ACTIONS={actions}
+EMOTION_SUMMARY={', '.join([f"{k}:{round(v,2)}" for k,v in npc_config.get('emotion',{}).items()])}
+INPUT="{user_input}"
 
-        # <PLAYER> 블록
-        player_block = f"<PLAYER>{user_input}</PLAYER>\n<NPC>"
+RAG:
+{rag_text or "(none)"}
 
-        return f"{sys_block}\n{ctx_block}\n{history_block}{player_block}"
-    
+INSTRUCTION:
+{instr}
+</FALLBACK>
+""".strip()
 
 class AgentManager:
-    """
-    NPC별 Agent 인스턴스를 관리하는 매니저
-    """
     def __init__(self):
         self.agents: Dict[str, NPCAgent] = {}
 
@@ -93,3 +92,6 @@ class AgentManager:
         if npc_id not in self.agents:
             self.agents[npc_id] = NPCAgent(npc_id)
         return self.agents[npc_id]
+
+# 전역 인스턴스
+agent_manager = AgentManager()

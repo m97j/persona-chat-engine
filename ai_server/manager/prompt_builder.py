@@ -1,79 +1,85 @@
-from rag.rag_generator import retrieve
-from typing import Dict
-from manager.agent_manager import AgentManager
+from typing import Dict, List
 
-agent_manager = AgentManager()
+def _format_history(ctx: List[dict]) -> str:
+    return "\n".join(f"{t['role']}: {t['text']}" for t in ctx)
 
-def build_main_prompt(preprocessed: dict, context: str, session_id: str, npc_id: str) -> str:
-    agent = agent_manager.get_agent(npc_id)
+def build_main_prompt(pre: dict, session_id: str, npc_id: str, max_history: int = 6) -> str:
+    tags = pre.get("tags", {})
+    ps = pre.get("player_state", {})
+    gs = pre.get("game_state", {})
+    rag_text = "\n".join(f"- {doc}" for doc in pre.get("rag_main_docs", []))
+    ctx_text = _format_history(pre.get("context", [])[-max_history:])
 
-    short_history = preprocessed.get("short_history", [])
-    user_input = preprocessed.get("text", "")
-    npc_config = preprocessed.get("npc_config", {})
-    player_state = {
-        "stage": preprocessed.get("quest_stage", "unknown"),
-        "location": preprocessed.get("location", "unknown"),
-        "relationship": preprocessed.get("relationship", "neutral"),
-        "trust": preprocessed.get("trust", "0.5"),
-        "reputation": preprocessed.get("player_reputation", "average"),
-        "items": preprocessed.get("player_items", []),
-        "actions": preprocessed.get("player_actions", []),
-        "input": user_input,
-    }
+    items = ",".join(ps.get("items", []))
+    actions = ",".join(ps.get("actions", []))
+    location = gs.get("location") or ps.get("location", "unknown")
+    quest_stage = gs.get("quest_stage", "unknown")
 
-    return agent.to_prompt(
-        user_input=user_input,
-        short_history=short_history,
-        context=preprocessed.get("context", {}),
-        npc_config=npc_config,
-        player_state=player_state
-    )
+    sys_block = f"""<SYS>
+NPC_ID={npc_id}
+SESSION_ID={session_id}
+<STATE/>
+LOCATION={location}
+QUEST_STAGE={quest_stage}
+NPC_MOOD={tags.get("npc_mood","neutral")}
+RELATIONSHIP={tags.get("relationship","neutral")}
+TRUST={tags.get("trust","0.5")}
+PLAYER_REPUTATION={ps.get("reputation","average")}
+STYLE={tags.get("style","neutral")}
+ITEMS={items}
+ACTIONS={actions}
+FORMAT:
+  <RESPONSE>...</RESPONSE>
+  <DELTA trust="..." relationship="..." />
+  <FLAG name="..." />
+</SYS>"""
 
-def build_fallback_prompt(npc_config: dict, player_state: dict, emotions: dict, session_id: str, npc_id: str) -> str:
-    query = f"{npc_id}:{quest_stage}:trigger"
-    filters = {"npc_id": npc_id}
-    retrieved_docs = retrieve(query, filters)
+    rag_block = f"<RAG>\n{rag_text}\n</RAG>" if rag_text else "<RAG/>"
+    ctx_block = f"<CTX>\n{ctx_text}\n</CTX>" if ctx_text else "<CTX/>"
+    player_block = f"<PLAYER>{pre['player_utterance']}</PLAYER>\n<NPC>"
 
-    npc_name = npc_config.get("name", "NPC")
-    persona = npc_config.get("persona_name", npc_name)
-    description = npc_config.get("description", "")
-    location = player_state.get("location", "알 수 없음")
-    quest_stage = player_state.get("stage", "초기")
-    relationship = player_state.get("relationship", "중립")
-    trust = player_state.get("trust", "0.5")
-    reputation = player_state.get("reputation", "보통")
-    style = npc_config.get("style", "기본")
-    mood = emotions.get("dominant", "neutral")
-    emotion_summary = ", ".join([f"{k}:{round(v,2)}" for k,v in emotions.items()])
-    items = player_state.get("items", [])
-    actions = player_state.get("actions", [])
-    input_text = player_state.get("input", "")
+    return f"{sys_block}\n{rag_block}\n{ctx_block}\n{player_block}"
 
-    lore = "\n".join(retrieved_docs)
+def build_fallback_prompt(pre: dict, session_id: str, npc_id: str) -> str:
+    tags = pre.get("tags", {})
+    ps = pre.get("player_state", {})
+    gs = pre.get("game_state", {})
+    rag_text = "\n".join(f"- {doc}" for doc in pre.get("rag_fallback_docs", []))
+    fb = pre.get("fallback_style") or {}
+
+    items = ",".join(ps.get("items", []))
+    actions = ",".join(ps.get("actions", []))
+    location = gs.get("location") or ps.get("location", "unknown")
+    quest_stage = gs.get("quest_stage", "unknown")
+
+    instr = "조건 불충족. 스토리 진행은 하지 않고, 캐릭터 일관성을 유지하며 자연스럽게 응답하라."
+    if fb:
+        # 선택적 구체화
+        s = fb.get("style"); a = fb.get("npc_action"); e = fb.get("npc_emotion")
+        more = []
+        if s: more.append(f"대화 스타일={s}")
+        if a: more.append(f"NPC 행동={a}")
+        if e: more.append(f"NPC 감정={e}")
+        if more:
+            instr += " " + "; ".join(more) + "."
 
     return f"""
 <FALLBACK>
-NPC={npc_name}
-Persona={persona}
-Description={description}
-Location={location}
-Quest Stage={quest_stage}
-Relationship={relationship}
-Trust={trust}
-Reputation={reputation}
-Mood={mood}
-Style={style}
-Emotion Summary={emotion_summary}
-Items={items}
-Actions={actions}
-Input="{input_text}"
+NPC_ID={npc_id}
+SESSION_ID={session_id}
+LOCATION={location}
+QUEST_STAGE={quest_stage}
+MOOD={tags.get("npc_mood","neutral")}
+STYLE={tags.get("style","neutral")}
+ITEMS={items}
+ACTIONS={actions}
+EMOTION_SUMMARY={', '.join([f"{k}:{round(v,2)}" for k,v in pre.get('emotion',{}).items()])}
+INPUT="{pre['player_utterance']}"
 
-Lore:
-{lore}
+RAG:
+{rag_text or "(none)"}
 
-Instruction:
-플레이어의 입력이 명확하지 않거나 조건을 만족하지 않습니다.
-NPC는 현재 설정과 감정 상태, 배경 정보를 기반으로 자연스럽고 몰입감 있는 반응을 생성하십시오.
-스토리 진행은 하지 않지만, NPC의 성격에 맞는 대사와 행동을 출력하십시오.
+INSTRUCTION:
+{instr}
 </FALLBACK>
-"""
+""".strip()

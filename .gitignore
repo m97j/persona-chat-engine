@@ -1,0 +1,27 @@
+# Python 캐시 및 빌드 파일
+__pycache__/
+*.py[cod]
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+venv/
+
+# 환경 설정
+.env
+*.log
+
+# 모델 디렉토리 무시
+ai_server/models/emotion-classification-model/
+ai_server/models/fallback-npc-model/
+ai_server/models/sentence-embedder/
+ai_server/chroma_db/
+
+# IDE 설정
+.vscode/
+.idea/
+
+# OS 파일
+.DS_Store
+Thumbs.db

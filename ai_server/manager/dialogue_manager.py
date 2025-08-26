@@ -3,7 +3,7 @@ from pipeline.preprocess import preprocess_input
 from pipeline.generator import generate_response
 from pipeline.postprocess import final_check, extract_game_data
 from models.fallback_model import generate_fallback_response
-from manager.prompt_builder import build_main_prompt, build_fallback_prompt
+from manager.agent_manager import agent_manager
 
 async def handle_dialogue(
     request: Request,
@@ -13,21 +13,23 @@ async def handle_dialogue(
     context: dict,
     npc_config: dict
 ) -> dict:
-    # 1. 입력 전처리
     pre = await preprocess_input(request, session_id, npc_id, user_input, context)
+    agent = agent_manager.get_agent(npc_id)
 
-    # 2. 유효하지 않은 입력일 경우 fallback 처리
+    # --- Fallback 경로 ---
     if not pre.get("is_valid", True):
-        fallback_prompt = build_fallback_prompt(
-            npc_config=npc_config,
-            player_state=pre.get("player_state", {}),
-            emotion=pre.get("emotion", ""),
+        fb_prompt = agent.to_prompt(
+            mode="fallback",
             session_id=session_id,
-            npc_id=npc_id
+            user_input=pre["player_utterance"],
+            short_history=pre.get("context", []),
+            npc_config=pre["tags"],
+            player_state=pre["player_state"],
+            game_state=pre["game_state"],
+            fallback_style=pre.get("fallback_style")
         )
-        fallback_text = await generate_fallback_response(request, fallback_prompt)
-        post = await final_check(fallback_text, user_input, context, npc_config)
-
+        fb_raw = await generate_fallback_response(request, fb_prompt)
+        post = await final_check(fb_raw, user_input, context, npc_config)
         return {
             "npc_output_text": post["text"],
             "flags": {"trigger": "fallback"},
@@ -36,24 +38,30 @@ async def handle_dialogue(
             "meta": post["meta"]
         }
 
-    # 3. 메인 프롬프트 생성 및 응답 생성
-    prompt = build_main_prompt(
-        pre=pre,
-        history=context.get("history", ""),
+    # --- Main 경로 ---
+    main_prompt = agent.to_prompt(
+        mode="main",
         session_id=session_id,
-        npc_id=npc_id
+        user_input=pre["player_utterance"],
+        short_history=pre.get("context", []),
+        npc_config=pre["tags"],
+        player_state=pre["player_state"],
+        game_state=pre["game_state"]
     )
-    generated_text = await generate_response(session_id, npc_id, prompt)
+    result = await generate_response(session_id, npc_id, main_prompt, max_tokens=200)
+    generated_text = result.get("text", "...")
 
-    # 4. 응답 후처리 및 flag/delta 추출
     post = await final_check(generated_text, user_input, context, npc_config)
     deltas, flags = await extract_game_data(post["text"], context)
 
-    # 5. 최종 결과 반환
+    # 모델이 직접 준 delta/flag도 병합
+    model_deltas = result.get("delta") or []
+    model_flags = result.get("flag") or []
+
     return {
         "npc_output_text": post["text"],
-        "flags": flags,
-        "deltas": deltas,
+        "flags": flags or model_flags,
+        "deltas": deltas or model_deltas,
         "valid": post["valid"],
         "meta": post["meta"]
     }

@@ -37,5 +37,37 @@
     "description": "tomson은 플레이어가 숲에 들어가고 'broken_compass'를 가진 상태에서 길을 잃었다는 표현을 하면 도움을 준다.",
     "action": "give_hint",
     "flag": ["dialogue_branch"]
+  },
+  {
+    "id": "mother_abandoned_factory_map1_in_progress_main_1",
+    "content": "조건: items 포함 'photo_forgotten_party' 그리고 actions에 'visited_factory'. 지시: 신뢰도 +0.10, 관계 +0.20. FLAG 'npc_main_story' 설정. 대화 톤: 조심스럽지만 희망을 본다.",
+    "metadata": {
+      "npc_id": "mother_abandoned_factory",
+      "location": "map1",
+      "quest_stage": "in_progress",
+      "type": "main",
+      "require": {
+        "items": ["photo_forgotten_party"],
+        "actions": ["visited_factory"]
+      },
+      "delta": {"trust": 0.10, "relationship": 0.20},
+      "flag": ["npc_main_story"]
+    }
+  },
+  {
+    "id": "mother_abandoned_factory_map1_in_progress_fallback_1",
+    "content": "조건: required_text 미충족 또는 감정 임계 미만. 지시: 스토리 진행 금지. Style: guarded. NPC_Action: deflect. NPC_Emotion: suspicious.",
+    "metadata": {
+      "npc_id": "mother_abandoned_factory",
+      "location": "map1",
+      "quest_stage": "in_progress",
+      "type": "fallback",
+      "require": {},
+      "fallback_style": {
+        "style": "guarded",
+        "npc_action": "deflect",
+        "npc_emotion": "suspicious"
+      }
+    }
   }
 ]

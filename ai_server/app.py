@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from models.model_loader import load_emotion_model, load_fallback_model, load_embedder
 from schemas import AskReq, AskRes
 from pathlib import Path
-
+from rag.rag_generator import set_embedder
 
 # 모델 이름
 EMOTION_MODEL_NAME = "tae898/emoberta-base-ko"
@@ -35,6 +35,7 @@ async def lifespan(app: FastAPI):
     # Embedder
     embedder = load_embedder(EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR)
     app.state.embedder = embedder
+    set_embedder(embedder)  # 추가
 
     print("✅ 모든 모델 로딩 완료")
 
@@ -95,26 +96,44 @@ async def wake(request: Request):
 game-server 요청 구조 예시:
 {
   "session_id": "abc123",
-  "npc_id": "npc_001",
-  "user_input": "안녕, 오늘 기분 어때?",
+  "npc_id": "mother_abandoned_factory",
+  "user_input": "아! 머리가… 기억이 떠올랐어요.",
   "context": {
     "player_status": {
-      "level": 12,
-      "inventory": ["sword", "potion"],
-      "reputation": "neutral"
+      "level": 7,
+      "reputation": "helpful",
+      "location": "map1",
+      "items": ["photo_forgotten_party"],
+      "actions": ["visited_factory", "talked_to_guard"]
     },
     "game_state": {
-      "current_quest": "dragon_hunt",
-      "location": "village",
+      "current_quest": "search_jason",
+      "quest_stage": "in_progress",
+      "location": "map1",
       "time_of_day": "evening"
     },
     "npc_config": {
-      "name": "엘라",
-      "personality": "친절하고 조용함",
-      "backstory": "마을의 약초상으로, 과거에 용병이었던 경험이 있음",
-      "dialogue_style": "짧고 단정한 말투",
-      "relationship": "친구"
-    }
+      "id": "mother_abandoned_factory",
+      "name": "실비아",
+      "persona_name": "Silvia",
+      "dialogue_style": "emotional",
+      "relationship": 0.35,
+      "npc_mood": "grief",
+      "trigger_values": {
+        "in_progress": ["기억", "사진", "파티"]
+      },
+      "trigger_definitions": {
+        "in_progress": {
+          "required_text": ["기억", "사진"],
+          "emotion_threshold": {"sad": 0.2},
+          "fallback_style": {"style": "guarded", "npc_emotion": "suspicious"}
+        }
+      }
+    },
+    "dialogue_history": [
+      {"player": "혹시 이 공장에서 본 걸 말해줘요.", "npc": "그날을 떠올리는 게 너무 힘들어요."}
+    ]
   }
 }
+
 '''

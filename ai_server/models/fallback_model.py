@@ -1,6 +1,5 @@
 import torch
 from fastapi import Request
-from manager.prompt_builder import build_fallback_prompt
 
 async def generate_fallback_response(request: Request, prompt: str) -> str:
     tokenizer = request.app.state.fallback_tokenizer

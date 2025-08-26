@@ -1,52 +1,50 @@
-import os
-import json
-
-from sentence_transformers import SentenceTransformer
-
-# 초기화
+import os, json
+from typing import List, Dict, Any, Optional
 from chromadb import PersistentClient
 
-client = PersistentClient(path="./chroma_db")
-collection = client.get_or_create_collection(name="game_docs")
-embedder = SentenceTransformer("all-MiniLM-L6-v2")
+_client = PersistentClient(path="./chroma_db")
+_collection = _client.get_or_create_collection(name="game_docs")
+_embedder = None
 
+def set_embedder(embedder):
+    global _embedder
+    _embedder = embedder
 
 def chroma_initialized() -> bool:
     return os.path.exists("./chroma_db") and len(os.listdir("./chroma_db")) > 0
 
-def load_game_docs_from_disk(path: str) -> list[dict]:
+def load_game_docs_from_disk(path: str) -> List[Dict[str, Any]]:
     docs = []
     for filename in os.listdir(path):
+        full = os.path.join(path, filename)
         if filename.endswith(".json"):
-            with open(os.path.join(path, filename), "r", encoding="utf-8") as f:
-                docs.extend(json.load(f))
+            with open(full, "r", encoding="utf-8") as f:
+                data = json.load(f)
+                if isinstance(data, list):
+                    docs.extend(data)
+                else:
+                    docs.append(data)
         elif filename.endswith(".txt"):
-            with open(os.path.join(path, filename), "r", encoding="utf-8") as f:
+            with open(full, "r", encoding="utf-8") as f:
                 content = f.read()
-                docs.append({
-                    "id": filename,
-                    "content": content,
-                    "metadata": {}
-                })
+                docs.append({"id": filename, "content": content, "metadata": {}})
     return docs
 
-# 문서 추가
-def add_docs(docs: list[dict]):
+def add_docs(docs: List[Dict[str, Any]]):
+    assert _embedder is not None, "Embedder not initialized"
     for doc in docs:
-        embedding = embedder.encode(doc["content"]).tolist()
-        collection.add(
+        assert "id" in doc and "content" in doc, "doc requires id and content"
+        meta = doc.get("metadata", {})
+        emb = _embedder.encode(doc["content"]).tolist()
+        _collection.add(
             documents=[doc["content"]],
-            embeddings=[embedding],
-            metadatas=[doc["metadata"]],
+            embeddings=[emb],
+            metadatas=[meta],
             ids=[doc["id"]]
         )
 
-# 검색
-def retrieve(query: str, filters: dict = None, top_k: int = 5) -> list[str]:
-    query_embedding = embedder.encode(query).tolist()
-    results = collection.query(
-        query_embeddings=[query_embedding],
-        n_results=top_k,
-        where=filters
-    )
-    return results["documents"][0]
+def retrieve(query: str, filters: Optional[Dict[str, Any]] = None, top_k: int = 5) -> List[str]:
+    assert _embedder is not None, "Embedder not initialized"
+    q_emb = _embedder.encode(query).tolist()
+    res = _collection.query(query_embeddings=[q_emb], n_results=top_k, where=filters or {})
+    return res.get("documents", [[]])[0]
