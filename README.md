@@ -69,149 +69,200 @@ GameServer --npc text, env flags--> Client
 
 * ### 전체 프로젝트 구조
 ```mermaid
-flowchart TB
-  %% === 색상 클래스 정의 ===
-  classDef client fill:#2ECC71,stroke:#145A32,color:#fff;
-  classDef gameserver fill:#3498DB,stroke:#1B4F72,color:#fff;
-  classDef db fill:#E67E22,stroke:#7E5109,color:#fff;
-  classDef ais fill:#95A5A6,stroke:#424949,color:#fff;
-  classDef hf fill:#9B59B6,stroke:#512E5F,color:#fff;
-  classDef fallback fill:#F39C12,stroke:#7E5109,color:#fff;
-  classDef rag fill:#1ABC9C,stroke:#0E6251,color:#fff;
-
-  %% 클라이언트
-  subgraph Client["Game Client (Unity)"]
-    CLIENT_IN["session_id, npc_id, user_input"]:::client
+---
+config:
+  theme: dark
+---
+flowchart RL
+ subgraph Client["Game Client (Unity)"]
+        CLIENT_IN["session_id, npc_id, user_input"]
   end
-
-  %% 게임 서버
-  subgraph GameServer["Game Server (Node.js)"]
-    BUILD_PAYLOAD["payload 구성"]:::gameserver
-    subgraph Payload["payload 구조"]
-      ssid["session_id"]:::gameserver
-      npcid["npc_id"]:::gameserver
-      ctx["context"]:::gameserver
-      history["dialogue_history"]:::gameserver
-    end
-    APPLY["ai-server결과 적용"]:::gameserver
-    UPDATE_DB["상태/DB 업데이트"]:::gameserver
-    CLIENT["클라이언트 전송\n(아이템ID, 퀘스트 단계 등)"]:::gameserver
+ subgraph Payload["payload 구조"]
+        ssid["session_id"]
+        npcid["npc_id"]
+        ctx["context"]
+        history["dialogue_history"]
   end
-
-%% AI 서버
-  subgraph AIServer["ai_server (Python)"]
-    subgraph app["app.py"]
-      ask["/ask endpoint"]:::ais
-    end
-    subgraph dlgmang["dialogue_manager.py"]
-      subgraph PRE["Preprocess"]
-        VALIDATE["입력 유효성 체크"]:::ais
-        FILTER["금지어/조건 필터링"]:::ais
-      end
-      subgraph POST["Postprocess"]
-        MAP["flag index→name 매핑"]:::ais
-        RAG_MATCH["RAG 기반 flag 설명/조건 확인"]:::ais
-        FORMAT["게임서버 전송 포맷 변환"]:::ais
-      end
-    DECISION{"전처리 통과?"}:::ais
-    end
-
-    subgraph PROMPTBUILD["prompt_builder.py"]
-      subgraph mainprpt["build main prompt"]
-        mSYS["<SYS>: NPC 메타, tags, lore, player_state"]:::ais
-        mRAG["<RAG>: 추론시 조건/지시문 (학습시 비움)"]:::ais
-        mCTX["<CTX>: 대화 이력"]:::ais
-        mPLAYER["<PLAYER>: 플레이어 발화"]:::ais
-      end
-      subgraph fbprpt["build fallback prompt"]
-        fSYS["<SYS>: NPC 메타, tags, lore, player_state"]:::ais
-        fRAG["<RAG>: 추론시 조건/지시문 (학습시 비움)"]:::ais
-        fPLAYER["<PLAYER>: 플레이어 발화"]:::ais
-      end
-    end
-
-    %% 폴백모델
-    subgraph FB["Fallback Model (경량)"]
-      FB_GEN["간단 응답 생성"]:::fallback
-    end
-
-    subgraph raggen["rag_generator.py"]
-      RAG_GEN["retrieve"]:::rag
-    end
-  
+ subgraph GameServer["Game Server (Node.js)"]
+        BUILD_PAYLOAD["payload 구성"]
+        Payload
+        APPLY["ai-server결과 적용"]
+        UPDATE_DB["상태/DB 업데이트"]
+        CLIENT["클라이언트 전송\n(아이템ID, 퀘스트 단계 등)"]
   end
-
-  subgraph DB["MongoAtlas Database"]
-    DB_PLAYER["player_status"]:::db
-    DB_GAME["game_state"]:::db
-    DB_NPC["npc_config"]:::db
-    DB_HISTORY["dialogue_history"]:::db
+ subgraph app["app.py"]
+        ask["/ask endpoint"]
   end
-
-    %% 메인모델 - 외부 hf-serve
-  subgraph HFServe["hf-serve /predict_main"]
-    EMB["Token Embedding + RoPE"]:::hf
-    DEC["Decoder-only Transformer ×N\n(LoRA: q,k,v,o + gate/up/down proj)\n[Attention(Q,K,V)=softmax(QK^T/√d_k)·V]"]:::hf
-    LM["LM Head → 응답 토큰"]:::hf
-    POOL["STATE-token Pooling"]:::hf
-    DELTA["Delta Head [-1,1] (tanh)"]:::hf
-    FLAG["Flag Head [0..1] (sigmoid)"]:::hf
+ subgraph PRE["Preprocess"]
+        VALIDATE["입력 유효성 체크"]
+        FILTER["금지어/조건 필터링"]
   end
-
-%%connection
-  CLIENT_IN --> BUILD_PAYLOAD
-  BUILD_PAYLOAD --session_id--> DB_PLAYER
-  BUILD_PAYLOAD --session_id--> DB_GAME
-  BUILD_PAYLOAD --session_id, npc_id--> DB_NPC
-  DB_PLAYER --player_state--> ctx
-  DB_GAME --game state--> ctx
-  DB_GAME --dialogue history--> history
-  DB_NPC --NPC 메타, lore--> ctx
-  BUILD_PAYLOAD --session_id--> ssid
-  BUILD_PAYLOAD --npc_id--> npcid
-  BUILD_PAYLOAD --player utterance --> ctx
-  Payload --ai_server ask/ 요청--> ask --> PRE
-
-%% pre and main generate connection
-  PRE --> DECISION
-  DECISION -- 예 --> mainprpt
-  DECISION -- 아니오 --> fbprpt--> FB_GEN --> POST
-  mainprpt --query--> raggen
-  fbprpt --query--> raggen
-  RAG_GEN --> mRAG
-  RAG_GEN --> fRAG
-
-%% hf-serve connection
-  mSYS --> EMB
-  mRAG --> EMB
-  mCTX --> EMB
-  mPLAYER --> EMB
-
-%% model connection
-  EMB --> DEC
-  DEC --> LM
-  DEC --> POOL
-  POOL --> DELTA
-  POOL --> FLAG
-
-%% post connection
-  DELTA --> FORMAT
-  FLAG --> MAP --> RAG_MATCH --query--> RAG_GEN
-  RAG_GEN --조건 description--> RAG_MATCH --> FORMAT
-  LM --> FORMAT
-  FORMAT --> ask
-  ask --> APPLY --> CLIENT
-  APPLY --> UPDATE_DB
-  CLIENT --> Client
-
-%% 클래스 적용
-  class CLIENT_IN,Client client
-  class BUILD_PAYLOAD,Payload,ssid,npcid,ctx,history,APPLY,UPDATE_DB,CLIENT gameserver
-  class DB_PLAYER,DB_GAME,DB_NPC,DB_HISTORY db
-  class ask,VALIDATE,FILTER,MAP,RAG_MATCH,FORMAT,mSYS,mRAG,mCTX,mPLAYER,fSYS,fRAG,fPLAYER ais
-  class EMB,DEC,LM,POOL,DELTA,FLAG hf
-  class FB_GEN fallback
-  class RAG_GEN rag
+ subgraph POST["Postprocess"]
+        MAP["flag index→name 매핑"]
+        RAG_MATCH["RAG 기반 flag 설명/조건 확인"]
+        FORMAT["게임서버 전송 포맷 변환"]
+  end
+ subgraph dlgmang["dialogue_manager.py"]
+        PRE
+        POST
+        DECISION{"전처리 통과?"}
+  end
+ subgraph mainprpt["build main prompt"]
+        mSYS[": NPC 메타, tags, lore, player_state"]
+        mRAG[": 추론시 조건/지시문 (학습시 비움)"]
+        mCTX[": 대화 이력"]
+        mPLAYER[": 플레이어 발화"]
+  end
+ subgraph fbprpt["build fallback prompt"]
+        fSYS[": NPC 메타, tags, lore, player_state"]
+        fRAG[": 추론시 조건/지시문 (학습시 비움)"]
+        fPLAYER[": 플레이어 발화"]
+  end
+ subgraph PROMPTBUILD["prompt_builder.py"]
+        mainprpt
+        fbprpt
+  end
+ subgraph FB["Fallback Model (경량)"]
+        FB_GEN["간단 응답 생성"]
+  end
+ subgraph raggen["rag_generator.py"]
+        RAG_GEN["retrieve"]
+  end
+ subgraph AIServer["ai_server (Python)"]
+        app
+        dlgmang
+        PROMPTBUILD
+        FB
+        raggen
+  end
+ subgraph DB["MongoAtlas Database"]
+        DB_PLAYER["player_status"]
+        DB_GAME["game_state"]
+        DB_NPC["npc_config"]
+        DB_HISTORY["dialogue_history"]
+  end
+ subgraph HFServe["hf-serve /predict_main"]
+        EMB["Token Embedding + RoPE"]
+        DEC["Decoder-only Transformer ×N\n(LoRA: q,k,v,o + gate/up/down proj)\n[Attention(Q,K,V)=softmax(QK^T/√d_k)·V]"]
+        LM["LM Head → 응답 토큰"]
+        POOL["STATE-token Pooling"]
+        DELTA["Delta Head [-1,1] (tanh)"]
+        FLAG["Flag Head [0..1] (sigmoid)"]
+  end
+    CLIENT_IN --> BUILD_PAYLOAD
+    BUILD_PAYLOAD -- session_id --> DB_PLAYER & DB_GAME & ssid
+    BUILD_PAYLOAD -- session_id, npc_id --> DB_NPC
+    DB_PLAYER -- player_state --> ctx
+    DB_GAME -- game state --> ctx
+    DB_GAME -- dialogue history --> history
+    DB_NPC -- NPC 메타, lore --> ctx
+    BUILD_PAYLOAD -- npc_id --> npcid
+    BUILD_PAYLOAD -- player utterance --> ctx
+    Payload -- ai_server ask/ 요청 --> ask
+    ask --> PRE & APPLY
+    PRE --> DECISION
+    DECISION -- 예 --> mainprpt
+    DECISION -- 아니오 --> fbprpt
+    fbprpt --> FB_GEN
+    FB_GEN --> POST
+    mainprpt -- query --> raggen
+    fbprpt -- query --> raggen
+    RAG_GEN --> mRAG & fRAG
+    mSYS --> EMB
+    mRAG --> EMB
+    mCTX --> EMB
+    mPLAYER --> EMB
+    EMB --> DEC
+    DEC --> LM & POOL
+    POOL --> DELTA & FLAG
+    DELTA --> FORMAT
+    FLAG --> MAP
+    MAP --> RAG_MATCH
+    RAG_MATCH -- query --> RAG_GEN
+    RAG_GEN -- 조건 description --> RAG_MATCH
+    RAG_MATCH --> FORMAT
+    LM --> FORMAT
+    FORMAT --> ask
+    APPLY --> CLIENT & UPDATE_DB
+    CLIENT --> Client
+     CLIENT_IN:::client
+     CLIENT_IN:::client
+     ssid:::gameserver
+     ssid:::gameserver
+     npcid:::gameserver
+     npcid:::gameserver
+     ctx:::gameserver
+     ctx:::gameserver
+     history:::gameserver
+     history:::gameserver
+     BUILD_PAYLOAD:::gameserver
+     BUILD_PAYLOAD:::gameserver
+     Payload:::gameserver
+     APPLY:::gameserver
+     APPLY:::gameserver
+     UPDATE_DB:::gameserver
+     UPDATE_DB:::gameserver
+     CLIENT:::gameserver
+     CLIENT:::gameserver
+     ask:::ais
+     ask:::ais
+     VALIDATE:::ais
+     VALIDATE:::ais
+     FILTER:::ais
+     FILTER:::ais
+     MAP:::ais
+     MAP:::ais
+     RAG_MATCH:::ais
+     RAG_MATCH:::ais
+     FORMAT:::ais
+     FORMAT:::ais
+     DECISION:::ais
+     mSYS:::ais
+     mSYS:::ais
+     mRAG:::ais
+     mRAG:::ais
+     mCTX:::ais
+     mCTX:::ais
+     mPLAYER:::ais
+     mPLAYER:::ais
+     fSYS:::ais
+     fSYS:::ais
+     fRAG:::ais
+     fRAG:::ais
+     fPLAYER:::ais
+     fPLAYER:::ais
+     FB_GEN:::fallback
+     FB_GEN:::fallback
+     RAG_GEN:::rag
+     RAG_GEN:::rag
+     DB_PLAYER:::db
+     DB_PLAYER:::db
+     DB_GAME:::db
+     DB_GAME:::db
+     DB_NPC:::db
+     DB_NPC:::db
+     DB_HISTORY:::db
+     DB_HISTORY:::db
+     EMB:::hf
+     EMB:::hf
+     DEC:::hf
+     DEC:::hf
+     LM:::hf
+     LM:::hf
+     POOL:::hf
+     POOL:::hf
+     DELTA:::hf
+     DELTA:::hf
+     FLAG:::hf
+     FLAG:::hf
+     Client:::client
+    classDef client fill:#2ECC71,stroke:#145A32,color:#fff
+    classDef gameserver fill:#3498DB,stroke:#1B4F72,color:#fff
+    classDef db fill:#E67E22,stroke:#7E5109,color:#fff
+    classDef ais fill:#95A5A6,stroke:#424949,color:#fff
+    classDef hf fill:#9B59B6,stroke:#512E5F,color:#fff
+    classDef fallback fill:#F39C12,stroke:#7E5109,color:#fff
+    classDef rag fill:#1ABC9C,stroke:#0E6251,color:#fff
 ```
 
 ---
