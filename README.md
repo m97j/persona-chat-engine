@@ -31,26 +31,24 @@
 ```mermaid
 flowchart LR
   subgraph Input
-    T[Tokens]
-    E[Tokenizer]
+    U["Player Utterance"] --> Tok["Tokenizer"]
   end
-  T --> E --> I[Token Embedding]
-  P[RoPE on Q,K]:::op
-  subgraph Block_xN
-    direction LR
-    RN1[RMSNorm]
-    MHA[Multi-Head Attention]:::op
-    ADD1[Residual Add]
-    RN2[RMSNorm]
-    FFN[SwiGLU Feed-Forward]:::op
-    ADD2[Residual Add]
+
+  Tok --> Emb["Token Embedding + RoPE"]
+
+  subgraph DecoderOnly["Decoder-only Transformer xN (LoRA on Attention/FFN)"]
+    Attn["Multi-Head Attention (Causal, GQA)"]
+    R1["Residual + RMSNorm"]
+    FFN["SwiGLU Feed-Forward"]
+    R2["Residual + RMSNorm"]
   end
-  I --> P --> RN1 --> MHA --> ADD1 --> RN2 --> FFN --> ADD2
-  subgraph Output
-    H[LM Head]
-    S[Softmax]
-  end
-  Block_xN --> H --> S
+
+  Emb --> Attn --> R1 --> FFN --> R2
+
+  R2 --> LMHead["LM Head → Next Token"]
+  R2 --> Pool["STATE-token Pooling"]
+  Pool --> DeltaHead["Delta Head (2: trust, relationship) [-1,1]"]
+  Pool --> FlagHead["Flag Head (NUM_FLAGS, scores 0..1)"]
 
   classDef op fill:#eef,stroke:#669,stroke-width:1px;
 ```
@@ -67,6 +65,153 @@ HFServe --result--> AIServer
 AIServer <--> Postprocess
 AIServer --npc text, deltas, flags--> GameServer
 GameServer --npc text, env flags--> Client
+```
+
+* ### 전체 프로젝트 구조
+```mermaid
+flowchart TB
+  %% === 색상 클래스 정의 ===
+  classDef client fill:#2ECC71,stroke:#145A32,color:#fff;
+  classDef gameserver fill:#3498DB,stroke:#1B4F72,color:#fff;
+  classDef db fill:#E67E22,stroke:#7E5109,color:#fff;
+  classDef ais fill:#95A5A6,stroke:#424949,color:#fff;
+  classDef hf fill:#9B59B6,stroke:#512E5F,color:#fff;
+  classDef fallback fill:#F39C12,stroke:#7E5109,color:#fff;
+  classDef rag fill:#1ABC9C,stroke:#0E6251,color:#fff;
+
+  %% 클라이언트
+  subgraph Client["Game Client (Unity)"]
+    CLIENT_IN["session_id, npc_id, user_input"]:::client
+  end
+
+  %% 게임 서버
+  subgraph GameServer["Game Server (Node.js)"]
+    BUILD_PAYLOAD["payload 구성"]:::gameserver
+    subgraph Payload["payload 구조"]
+      ssid["session_id"]:::gameserver
+      npcid["npc_id"]:::gameserver
+      ctx["context"]:::gameserver
+      history["dialogue_history"]:::gameserver
+    end
+    APPLY["ai-server결과 적용"]:::gameserver
+    UPDATE_DB["상태/DB 업데이트"]:::gameserver
+    CLIENT["클라이언트 전송\n(아이템ID, 퀘스트 단계 등)"]:::gameserver
+  end
+
+%% AI 서버
+  subgraph AIServer["ai_server (Python)"]
+    subgraph app["app.py"]
+      ask["/ask endpoint"]:::ais
+    end
+    subgraph dlgmang["dialogue_manager.py"]
+      subgraph PRE["Preprocess"]
+        VALIDATE["입력 유효성 체크"]:::ais
+        FILTER["금지어/조건 필터링"]:::ais
+      end
+      subgraph POST["Postprocess"]
+        MAP["flag index→name 매핑"]:::ais
+        RAG_MATCH["RAG 기반 flag 설명/조건 확인"]:::ais
+        FORMAT["게임서버 전송 포맷 변환"]:::ais
+      end
+    DECISION{"전처리 통과?"}:::ais
+    end
+
+    subgraph PROMPTBUILD["prompt_builder.py"]
+      subgraph mainprpt["build main prompt"]
+        mSYS["<SYS>: NPC 메타, tags, lore, player_state"]:::ais
+        mRAG["<RAG>: 추론시 조건/지시문 (학습시 비움)"]:::ais
+        mCTX["<CTX>: 대화 이력"]:::ais
+        mPLAYER["<PLAYER>: 플레이어 발화"]:::ais
+      end
+      subgraph fbprpt["build fallback prompt"]
+        fSYS["<SYS>: NPC 메타, tags, lore, player_state"]:::ais
+        fRAG["<RAG>: 추론시 조건/지시문 (학습시 비움)"]:::ais
+        fPLAYER["<PLAYER>: 플레이어 발화"]:::ais
+      end
+    end
+
+    %% 폴백모델
+    subgraph FB["Fallback Model (경량)"]
+      FB_GEN["간단 응답 생성"]:::fallback
+    end
+
+    subgraph raggen["rag_generator.py"]
+      RAG_GEN["retrieve"]:::rag
+    end
+  
+  end
+
+  subgraph DB["MongoAtlas Database"]
+    DB_PLAYER["player_status"]:::db
+    DB_GAME["game_state"]:::db
+    DB_NPC["npc_config"]:::db
+    DB_HISTORY["dialogue_history"]:::db
+  end
+
+    %% 메인모델 - 외부 hf-serve
+  subgraph HFServe["hf-serve /predict_main"]
+    EMB["Token Embedding + RoPE"]:::hf
+    DEC["Decoder-only Transformer ×N\n(LoRA: q,k,v,o + gate/up/down proj)\n[Attention(Q,K,V)=softmax(QK^T/√d_k)·V]"]:::hf
+    LM["LM Head → 응답 토큰"]:::hf
+    POOL["STATE-token Pooling"]:::hf
+    DELTA["Delta Head [-1,1] (tanh)"]:::hf
+    FLAG["Flag Head [0..1] (sigmoid)"]:::hf
+  end
+
+%%connection
+  CLIENT_IN --> BUILD_PAYLOAD
+  BUILD_PAYLOAD --session_id--> DB_PLAYER
+  BUILD_PAYLOAD --session_id--> DB_GAME
+  BUILD_PAYLOAD --session_id, npc_id--> DB_NPC
+  DB_PLAYER --player_state--> ctx
+  DB_GAME --game state--> ctx
+  DB_GAME --dialogue history--> history
+  DB_NPC --NPC 메타, lore--> ctx
+  BUILD_PAYLOAD --session_id--> ssid
+  BUILD_PAYLOAD --npc_id--> npcid
+  BUILD_PAYLOAD --player utterance --> ctx
+  Payload --ai_server ask/ 요청--> ask --> PRE
+
+%% pre and main generate connection
+  PRE --> DECISION
+  DECISION -- 예 --> mainprpt
+  DECISION -- 아니오 --> fbprpt--> FB_GEN --> POST
+  mainprpt --query--> raggen
+  fbprpt --query--> raggen
+  RAG_GEN --> mRAG
+  RAG_GEN --> fRAG
+
+%% hf-serve connection
+  mSYS --> EMB
+  mRAG --> EMB
+  mCTX --> EMB
+  mPLAYER --> EMB
+
+%% model connection
+  EMB --> DEC
+  DEC --> LM
+  DEC --> POOL
+  POOL --> DELTA
+  POOL --> FLAG
+
+%% post connection
+  DELTA --> FORMAT
+  FLAG --> MAP --> RAG_MATCH --query--> RAG_GEN
+  RAG_GEN --조건 description--> RAG_MATCH --> FORMAT
+  LM --> FORMAT
+  FORMAT --> ask
+  ask --> APPLY --> CLIENT
+  APPLY --> UPDATE_DB
+  CLIENT --> Client
+
+%% 클래스 적용
+  class CLIENT_IN,Client client
+  class BUILD_PAYLOAD,Payload,ssid,npcid,ctx,history,APPLY,UPDATE_DB,CLIENT gameserver
+  class DB_PLAYER,DB_GAME,DB_NPC,DB_HISTORY db
+  class ask,VALIDATE,FILTER,MAP,RAG_MATCH,FORMAT,mSYS,mRAG,mCTX,mPLAYER,fSYS,fRAG,fPLAYER ais
+  class EMB,DEC,LM,POOL,DELTA,FLAG hf
+  class FB_GEN fallback
+  class RAG_GEN rag
 ```
 
 ---
@@ -219,7 +364,6 @@ FlagText --> GameServer
 
 ## 🎥 시연 자료
 > **Swagger 기반 로컬 테스트 영상 예정**  
-> (아래는 틀 예시 – 실제 영상은 추후 추가)
 
 ```
 [영상 썸네일]
@@ -238,9 +382,11 @@ FlagText --> GameServer
 
 ## 📁 포트폴리오 연계
 
-* **[FPS Game](https://github.com/m97j/fpsgame)**: 이벤트 테스트 및 게임 루프 연계
+* **[FPS Game](https://github.com/m97j/fpsgame)**:
+  * Client - 이벤트 테스트 및 게임 루프 연계
+  * game_server - ai_server의 ask/ endpoint 형식에 맞는 페이로드 생성, 통신 결과를 실제 게임 데이터(Game_DB)에 적용, Client와의 통신 담당
 * **[Persona Chat Engine](https://github.com/m97j/persona-chat-engine)**: 멀티 NPC, 스토리/퀘스트 전개 파이프라인
-* 이 두 프로젝트는 통합적으로 플레이어 경험 설계와 AI NPC 구현 능력을 강조
+* 이 두 프로젝트는 통합적으로 플레이어 경험 설계와 AI NPC 구현 능력을 강화함
 
 ---
 
