@@ -54,6 +54,7 @@ flowchart LR
 ```
 
 * ### 전체 프로젝트 통신 구조
+  ver 1
 ```mermaid
 graph TD
 Client[Unity Client] --input text--> GameServer[Node.js Game Server]
@@ -65,6 +66,33 @@ HFServe --result--> AIServer
 AIServer <--> Postprocess
 AIServer --npc text, deltas, flags--> GameServer
 GameServer --npc text, env flags--> Client
+```
+  ver2
+```mermaid
+flowchart TD
+    subgraph Unity_Client
+        UC[플레이어 입력]
+    end
+
+    subgraph Game_Server ["(Node.js)"]
+        GS1[DB 조회: NPC 조건, Player 상태]
+        GS2[Trigger 필터링 및 precheck_passed 판정]
+        GS3[Payload 생성 → ai-server]
+    end
+
+    subgraph AI Server ["(Python/FastAPI)"]
+        PRE[preprocess.py\n조건 판정 + RAG 검색]
+        AGENT[agent_manager.py\nAgent 관리 + Prompt 생성]
+        GEN["generator.py\n모델 호출 (async/await)"]
+        POST[postprocess.py\nDelta/Flag 추출]
+    end
+
+    subgraph HF Spaces
+        HF[LLM 추론 API]
+    end
+
+    UC --> GS1 --> GS2 --> GS3 --> PRE --> AGENT --> GEN --> HF --> GEN --> POST --> Game_Server --> Unity_Client
+
 ```
 
 * ### 전체 프로젝트 구조
