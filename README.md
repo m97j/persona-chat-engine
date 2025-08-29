@@ -373,6 +373,51 @@ ai-server/
   * `postprocess.py`는 RAG를 통해 해당 수치를 텍스트로 해석
   * 게임 서버는 이를 기반으로 실제 아이템 지급, 퀘스트 진행 등을 결정
 
+
+* ### 📌 RAG 문서 type별 조회·사용 매핑표
+
+| **type** | **조회 시점** | **조회 조건(filters)** | **사용 모듈/함수** | **주요 활용 목적** |
+|----------|--------------|------------------------|--------------------|--------------------|
+| `trigger_def` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:trigger_def", filters=...)` | - main 경로 조건 판정<br>- `required_text`, `required_items`, `required_actions`, `required_game_state`, `required_delta` 검사<br>- `emotion_threshold` 검사<br>- 조건 만족 시 `is_valid=True` |
+| `fallback` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:fallback", filters=...)` | - main 조건 불만족 시 fallback prompt 구성에 사용<br>- `fallback_style`(style, npc_action, npc_emotion) 포함 |
+| `forbidden_trigger_list` | **preprocess_input** | `npc_id` | `_load_forbidden_trigger_data()` | - 특수 fallback 감지 1차(키워드) / 2차(embedding 유사도) 검사<br>- `keywords` / `text` 리스트 사용 |
+| `trigger_meta` | **preprocess_input** | `npc_id`, `trigger` | `_load_trigger_meta()` | - 특수 fallback 시 action/delta 값 확정<br>- fallback_final_check에서 일치 여부 검증 |
+| `lore` | **build_main_prompt** | `npc_id`, `quest_stage` or `any` | RAG main docs에서 필터 | - main prompt의 세계관/배경 설명(LORE) 구성 |
+| `description` | **build_main_prompt** | `npc_id`, `quest_stage` | RAG main docs에서 필터 | - main prompt의 현재 상황/조건 설명(DESCRIPTION) 구성 |
+| `flag_def` | **postprocess_pipeline** | `npc_id`, `quest_stage`, `flag_name` | pre_data["rag_main_docs"]에서 필터 | - flag별 threshold, examples_positive/negative 가져오기<br>- main model 응답과 embedding 유사도 계산에 사용 |
+| `main_res_validate` | **postprocess_pipeline** | `npc_id`, `quest_stage` | pre_data["rag_main_docs"]에서 필터 | - main model 응답 최종 검증/재작성 기준 설명 텍스트 |
+| *(없음)* | **fallback_final_check** | pre_data["trigger_meta"] 직접 사용 | - | - fallback 응답이 action/delta와 의미적으로 일치하는지 검증<br>- 윤리·문화·사회적 필터링 |
+
+---
+
+* ### 📌 데이터 흐름 요약
+
+  ### **1. preprocess_input()**
+  - **trigger_def** → main 조건 판정
+  - **forbidden_trigger_list** + **trigger_meta** → 특수 fallback 감지 및 action/delta 확정
+  - **fallback** → 일반 fallback 스타일 정보
+  - **lore / description**는 여기서는 안 씀 (prompt 빌더에서 사용)
+  
+  ### **2. build_main_prompt()**
+  - **lore** + **description** → main prompt의 RAG 컨텍스트 구성
+  
+  ### **3. build_fallback_prompt()**
+  - **fallback** → fallback_style 반영
+  - **trigger_meta** → 특수 fallback 시 style/action/emotion 구체화
+  
+  ### **4. postprocess_pipeline()**
+  - **flag_def** → flag threshold + 예시 문장 가져오기
+  - **main_res_validate** → 응답 검증 기준 텍스트
+  
+  ### **5. fallback_final_check()**
+  - **trigger_meta** → action/delta와 응답 의미 일치 여부 검증
+
+
+💡 이렇게 매핑하여,  
+- 어떤 type이 어느 단계에서 쓰이는지 명확해져서 RAG 인덱스 설계와 검색 최적화가 쉬워지고  
+- 불필요한 재호출 없이 pre_data에서 재사용할 수 있습니다.
+
+
 ```mermaid
 graph TD
 ModelOutput["FLAG: give_item=0.92, npc_main_story=0.87"]
