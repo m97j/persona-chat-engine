@@ -2,37 +2,31 @@ from pydantic import BaseModel, Field
 from typing import List, Dict, Optional, Any
 
 class NPCConfig(BaseModel):
-    id: Optional[str] = None
-    name: Optional[str] = None
-    persona_name: Optional[str] = None
-    dialogue_style: Optional[str] = None
-    relationship: Optional[float] = None
-    npc_mood: Optional[str] = None
-    trigger_values: Optional[Dict[str, List[str]]] = None
-    trigger_definitions: Optional[Dict[str, Dict[str, Any]]] = None
+    id: Optional[str] = Field(None, description="NPC 고유 ID (설계 기준)")
+    name: Optional[str] = Field(None, description="NPC 표시 이름")
+    persona_name: Optional[str] = Field(None, description="NPC 페르소나 이름")
+    dialogue_style: Optional[str] = Field(None, description="대화 스타일")
+    relationship: Optional[float] = Field(None, description="기본 관계 수치 (-1.0~1.0)")
+    npc_mood: Optional[str] = Field(None, description="기본 감정 상태")
+    trigger_values: Optional[Dict[str, List[str]]] = Field(None, description="트리거 값 목록")
+    trigger_definitions: Optional[Dict[str, Dict[str, Any]]] = Field(None, description="트리거 정의")
 
 class DialogueTurn(BaseModel):
     player: str
     npc: str
 
 class Context(BaseModel):
-    player_status: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    game_state: Optional[Dict[str, Any]] = Field(default_factory=dict)
-    npc_config: Optional[NPCConfig] = None
-    dialogue_history: Optional[List[DialogueTurn]] = Field(default_factory=list)
-
-class AskReq(BaseModel):
-    session_id: str
-    npc_id: str
-    user_input: str
-    context: Optional[Context] = Field(default_factory=Context)
-
-class FlagItem(BaseModel):
-    score: float
-    value: Optional[str] = None
+    require: Optional[Dict[str, Any]] = Field(default_factory=dict, description="pre 1차 조건 판단용 필수/선택 요소")
+    player_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="플레이어 현재 상태")
+    game_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="게임 전역 상태")
+    npc_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="DB 최신 NPC 상태")
+    npc_config: Optional[NPCConfig] = Field(None, description="RAG 기반 설계 정보")
+    dialogue_history: Optional[List[DialogueTurn]] = Field(default_factory=list, description="최근 대화 히스토리")
 
 class AskRes(BaseModel):
-    npc_response: str
-    flags: Dict[str, FlagItem] = Field(default_factory=dict)
+    session_id: str
+    npc_output_text: str
+    deltas: Dict[str, float] = Field(default_factory=dict, description="이번 턴 변화량")
+    flags: Dict[str, int] = Field(default_factory=dict, description="플래그 이진값 {flag_name: 0|1}")
     valid: bool
-    meta: Dict[str, Any] = Field(default_factory=dict)
+    meta: Dict[str, Any] = Field(default_factory=dict, description="추가 메타데이터 (npc_id, quest_stage, location 등)")

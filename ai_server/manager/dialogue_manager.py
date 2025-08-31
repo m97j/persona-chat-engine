@@ -1,9 +1,9 @@
 from fastapi import Request
 from pipeline.preprocess import preprocess_input
 from pipeline.generator import generate_response
-from pipeline.postprocess import final_check, extract_game_data
+from pipeline.postprocess import postprocess_pipeline, fallback_final_check
 from models.fallback_model import generate_fallback_response
-from manager.agent_manager import agent_manager
+from prompt_builder import build_main_prompt, build_fallback_prompt  # 수정된 prompt 빌더 사용
 
 async def handle_dialogue(
     request: Request,
@@ -11,57 +11,58 @@ async def handle_dialogue(
     npc_id: str,
     user_input: str,
     context: dict,
-    npc_config: dict
 ) -> dict:
+    """
+    전체 대화 처리 파이프라인:
+      1) preprocess_input() → pre 데이터 생성
+      2) main 경로: main prompt → main model → postprocess_pipeline()
+      3) fallback 경로: fallback prompt → fallback model → fallback_final_check()
+    """
+    # 1. Preprocess
     pre = await preprocess_input(request, session_id, npc_id, user_input, context)
-    agent = agent_manager.get_agent(npc_id)
 
-    # --- Fallback 경로 ---
+    # 2. Fallback 경로
     if not pre.get("is_valid", True):
-        fb_prompt = agent.to_prompt(
-            mode="fallback",
-            session_id=session_id,
-            user_input=pre["player_utterance"],
-            short_history=pre.get("context", []),
-            npc_config=pre["tags"],
-            player_state=pre["player_state"],
-            game_state=pre["game_state"],
-            fallback_style=pre.get("fallback_style")
-        )
+        # fallback prompt 구성 (내부에서 additional_trigger 기반 분기)
+        fb_prompt = build_fallback_prompt(pre, session_id, npc_id)
+
+        # fallback model 호출
         fb_raw = await generate_fallback_response(request, fb_prompt)
-        post = await final_check(fb_raw, user_input, context, npc_config)
+
+        # fallback 전용 최종 검증
+        fb_checked = await fallback_final_check(
+            request=request,
+            fb_response=fb_raw,
+            player_utt=pre["player_utterance"],
+            npc_config=pre["tags"],
+            action_delta=pre.get("trigger_meta", {})
+        )
+
+        # payload 구성 후 반환
         return {
-            "npc_output_text": post["text"],
-            "flags": {"trigger": "fallback"},
-            "deltas": [],
-            "valid": post["valid"],
-            "meta": post["meta"]
+            "session_id" : session_id,
+            "npc_output_text": fb_checked,
+            "flags": {},  # fallback은 flag/delta 이미 pre에서 확정
+            "deltas": pre.get("trigger_meta", {}).get("delta", {}),
+            "meta": {
+                "npc_id": pre["npc_id"],
+                "quest_stage": pre["game_state"].get("quest_stage", "default"),
+                "location": pre["game_state"].get("location", context.get("location", "unknown"))
+            }
         }
 
-    # --- Main 경로 ---
-    main_prompt = agent.to_prompt(
-        mode="main",
-        session_id=session_id,
-        user_input=pre["player_utterance"],
-        short_history=pre.get("context", []),
-        npc_config=pre["tags"],
-        player_state=pre["player_state"],
-        game_state=pre["game_state"]
-    )
+    # 3. Main 경로
+    main_prompt = build_main_prompt(pre, session_id, npc_id)
+
+    # main model 호출
     result = await generate_response(session_id, npc_id, main_prompt, max_tokens=200)
-    generated_text = result.get("text", "...")
 
-    post = await final_check(generated_text, user_input, context, npc_config)
-    deltas, flags = await extract_game_data(post["text"], context)
+    # postprocess_pipeline에서 최종 payload 생성
+    return_payload = await postprocess_pipeline(
+        request=request,
+        pre_data=pre,           # preprocess 결과 전체 전달
+        model_payload=result,   # main model 출력
+        context=context
+    )
 
-    # 모델이 직접 준 delta/flag도 병합
-    model_deltas = result.get("delta") or []
-    model_flags = result.get("flag") or []
-
-    return {
-        "npc_output_text": post["text"],
-        "flags": flags or model_flags,
-        "deltas": deltas or model_deltas,
-        "valid": post["valid"],
-        "meta": post["meta"]
-    }
+    return return_payload

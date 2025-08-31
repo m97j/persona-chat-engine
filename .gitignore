@@ -25,3 +25,6 @@ ai_server/chroma_db/
 # OS 파일
 .DS_Store
 Thumbs.db
+
+# alpha
+,ects
