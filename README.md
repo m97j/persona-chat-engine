@@ -4,54 +4,428 @@
 [![GitHub stars](https://img.shields.io/github/stars/m97j/persona-chat-engine)](https://github.com/m97j/persona-chat-engine)
 
 
-## 📌 개요
-**Persona Chat Engine**은 게임 내 NPC(Non-Player Character)와의 상호작용을 위한 AI 대화 엔진입니다.
-게임 플레이어의 선택과 행동, NPC 상태를 반영하여 자연스러운 대화와 퀘스트 진행을 생성하며, **Delta/Flag** 기반 행동 및 감정 변화를 모델링합니다.
-
-* **목표:** 게임 환경에서 몰입감 있는 AI NPC 대화와 퀘스트 반응 생성
-* **핵심 기술:** Transformer 기반 LLM, QLoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), 커스텀 프롬프트 포맷
+## 📑 목차
+- [📌 개요](#-개요)
+- [🧭 아키텍처](#-아키텍처)
+- [⚙️ AI 서버 (ai-server/)](#%EF%B8%8F-ai-서버-ai_server)
+- [🚀 Hugging Face Serve (hf-serve/)](#-hugging-face-spaces-hf-serve)
+- [📊 모델 학습 (train/)](#-모델-학습-train)
+- [📦 배포 계획](#-배포-계획)
+- [🎥 시연 자료](#-시연-자료)
+- [🏁 프로젝트 성과](#-프로젝트-성과)
 
 ---
 
-## ⚙️ 아키텍처
+## 📌 개요
+**Persona Chat Engine**은 게임 내 NPC(Non-Player Character)와의 상호작용을 위한 AI 대화 엔진입니다.  
+플레이어의 선택/행동, NPC 상태를 반영해 자연스러운 대사와 퀘스트 진행을 생성하며, **Delta/Flag** 기반의 상태 변화(신뢰·관계)와 이벤트 트리거를 함께 예측합니다.
+
+- **목표:** 게임 환경에서 몰입감 있는 AI NPC 대화와 퀘스트 반응 생성
+- **핵심 기술:** Transformer 기반 LLM, QLoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), 커스텀 프롬프트 포맷, RAG 기반 flag 해석
+
+---
+
+## 🧭 아키텍처
+
+* ### 모델 아키텍처
+```mermaid
+flowchart LR
+  subgraph Input
+    U["Player Utterance"] --> Tok["Tokenizer"]
+  end
+
+  Tok --> Emb["Token Embedding + RoPE"]
+
+  subgraph DecoderOnly["Decoder-only Transformer xN (LoRA on Attention/FFN)"]
+    Attn["Multi-Head Attention (Causal, GQA)"]
+    R1["Residual + RMSNorm"]
+    FFN["SwiGLU Feed-Forward"]
+    R2["Residual + RMSNorm"]
+  end
+
+  Emb --> Attn --> R1 --> FFN --> R2
+
+  R2 --> LMHead["LM Head → Next Token"]
+  R2 --> Pool["STATE-token Pooling"]
+  Pool --> DeltaHead["Delta Head (2: trust, relationship) [-1,1]"]
+  Pool --> FlagHead["Flag Head (NUM_FLAGS, scores 0..1)"]
+
+  classDef op fill:#eef,stroke:#669,stroke-width:1px;
+```
+
+* ### 전체 프로젝트 통신 구조
+  ver 1
 ```mermaid
 graph TD
 Client[Unity Client] --input text--> GameServer[Node.js Game Server]
-GameServer[Node.js Game Server] --ask ai--> AIServer[python AI Server]
-AIServer[python AI Server] <--> Preprocess
-AIServer[python AI Server] --prompt--> HF-Serve[HuggingFaceSpaces]
-HF-Serve[HuggingFaceSpaces] --> inference
-HF-Serve[HuggingFaceSpaces] --result--> AIServer[python AI Server]
-AIServer[python AI Server] <--> Postprocess
-AIServer[python AI Server] --npc text, deltas, flags--> GameServer[Node.js Game Server]
-GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
+GameServer --ask ai--> AIServer[Python AI Server]
+AIServer <--> Preprocess
+AIServer --prompt--> HFServe[HuggingFace Spaces]
+HFServe --> inference
+HFServe --result--> AIServer
+AIServer <--> Postprocess
+AIServer --npc text, deltas, flags--> GameServer
+GameServer --npc text, env flags--> Client
+```
+  ver2
+```mermaid
+flowchart TD
+    subgraph Unity_Client
+        UC[플레이어 입력]
+    end
+
+    subgraph Game_Server ["(Node.js)"]
+        GS1[DB 조회: NPC 조건, Player 상태]
+        GS2[Trigger 필터링 및 precheck_passed 판정]
+        GS3[Payload 생성 → ai-server]
+    end
+
+    subgraph AI Server ["(Python/FastAPI)"]
+        PRE[preprocess.py\n조건 판정 + RAG 검색]
+        AGENT[agent_manager.py\nAgent 관리 + Prompt 생성]
+        GEN["generator.py\n모델 호출 (async/await)"]
+        POST[postprocess.py\nDelta/Flag 추출]
+    end
+
+    subgraph HF Spaces
+        HF[LLM 추론 API]
+    end
+
+    UC --> GS1 --> GS2 --> GS3 --> PRE --> AGENT --> GEN --> HF --> GEN --> POST --> Game_Server --> Unity_Client
+
+```
+
+* ### 전체 프로젝트 구조
+```mermaid
+---
+config:
+  theme: dark
+---
+flowchart RL
+ subgraph Client["Game Client (Unity)"]
+        CLIENT_IN["session_id, npc_id, user_input"]
+  end
+ subgraph Payload["payload 구조"]
+        ssid["session_id"]
+        npcid["npc_id"]
+        ctx["context"]
+        history["dialogue_history"]
+  end
+ subgraph GameServer["Game Server (Node.js)"]
+        BUILD_PAYLOAD["payload 구성"]
+        Payload
+        APPLY["ai-server결과 적용"]
+        UPDATE_DB["상태/DB 업데이트"]
+        CLIENT["클라이언트 전송\n(아이템ID, 퀘스트 단계 등)"]
+  end
+ subgraph app["app.py"]
+        ask["/ask endpoint"]
+  end
+ subgraph PRE["Preprocess"]
+        VALIDATE["입력 유효성 체크"]
+        FILTER["금지어/조건 필터링"]
+  end
+ subgraph POST["Postprocess"]
+        MAP["flag index→name 매핑"]
+        RAG_MATCH["RAG 기반 flag 설명/조건 확인"]
+        FORMAT["게임서버 전송 포맷 변환"]
+  end
+ subgraph dlgmang["dialogue_manager.py"]
+        PRE
+        POST
+        DECISION{"전처리 통과?"}
+  end
+ subgraph mainprpt["build main prompt"]
+        mSYS[": NPC 메타, tags, lore, player_state"]
+        mRAG[": 추론시 조건/지시문 (학습시 비움)"]
+        mCTX[": 대화 이력"]
+        mPLAYER[": 플레이어 발화"]
+  end
+ subgraph fbprpt["build fallback prompt"]
+        fSYS[": NPC 메타, tags, lore, player_state"]
+        fRAG[": 추론시 조건/지시문 (학습시 비움)"]
+        fPLAYER[": 플레이어 발화"]
+  end
+ subgraph PROMPTBUILD["prompt_builder.py"]
+        mainprpt
+        fbprpt
+  end
+ subgraph FB["Fallback Model (경량)"]
+        FB_GEN["간단 응답 생성"]
+  end
+ subgraph raggen["rag_generator.py"]
+        RAG_GEN["retrieve"]
+  end
+ subgraph AIServer["ai_server (Python)"]
+        app
+        dlgmang
+        PROMPTBUILD
+        FB
+        raggen
+  end
+ subgraph DB["MongoAtlas Database"]
+        DB_PLAYER["player_status"]
+        DB_GAME["game_state"]
+        DB_NPC["npc_config"]
+        DB_HISTORY["dialogue_history"]
+  end
+ subgraph HFServe["hf-serve /predict_main"]
+        EMB["Token Embedding + RoPE"]
+        DEC["Decoder-only Transformer ×N\n(LoRA: q,k,v,o + gate/up/down proj)\n[Attention(Q,K,V)=softmax(QK^T/√d_k)·V]"]
+        LM["LM Head → 응답 토큰"]
+        POOL["STATE-token Pooling"]
+        DELTA["Delta Head [-1,1] (tanh)"]
+        FLAG["Flag Head [0..1] (sigmoid)"]
+  end
+    CLIENT_IN --> BUILD_PAYLOAD
+    BUILD_PAYLOAD -- session_id --> DB_PLAYER & DB_GAME & ssid
+    BUILD_PAYLOAD -- session_id, npc_id --> DB_NPC
+    DB_PLAYER -- player_state --> ctx
+    DB_GAME -- game state --> ctx
+    DB_GAME -- dialogue history --> history
+    DB_NPC -- NPC 메타, lore --> ctx
+    BUILD_PAYLOAD -- npc_id --> npcid
+    BUILD_PAYLOAD -- player utterance --> ctx
+    Payload -- ai_server ask/ 요청 --> ask
+    ask --> PRE & APPLY
+    PRE --> DECISION
+    DECISION -- 예 --> mainprpt
+    DECISION -- 아니오 --> fbprpt
+    fbprpt --> FB_GEN
+    FB_GEN --> POST
+    mainprpt -- query --> raggen
+    fbprpt -- query --> raggen
+    RAG_GEN --> mRAG & fRAG
+    mSYS --> EMB
+    mRAG --> EMB
+    mCTX --> EMB
+    mPLAYER --> EMB
+    EMB --> DEC
+    DEC --> LM & POOL
+    POOL --> DELTA & FLAG
+    DELTA --> FORMAT
+    FLAG --> MAP
+    MAP --> RAG_MATCH
+    RAG_MATCH -- query --> RAG_GEN
+    RAG_GEN -- 조건 description --> RAG_MATCH
+    RAG_MATCH --> FORMAT
+    LM --> FORMAT
+    FORMAT --> ask
+    APPLY --> CLIENT & UPDATE_DB
+    CLIENT --> Client
+     CLIENT_IN:::client
+     CLIENT_IN:::client
+     ssid:::gameserver
+     ssid:::gameserver
+     npcid:::gameserver
+     npcid:::gameserver
+     ctx:::gameserver
+     ctx:::gameserver
+     history:::gameserver
+     history:::gameserver
+     BUILD_PAYLOAD:::gameserver
+     BUILD_PAYLOAD:::gameserver
+     Payload:::gameserver
+     APPLY:::gameserver
+     APPLY:::gameserver
+     UPDATE_DB:::gameserver
+     UPDATE_DB:::gameserver
+     CLIENT:::gameserver
+     CLIENT:::gameserver
+     ask:::ais
+     ask:::ais
+     VALIDATE:::ais
+     VALIDATE:::ais
+     FILTER:::ais
+     FILTER:::ais
+     MAP:::ais
+     MAP:::ais
+     RAG_MATCH:::ais
+     RAG_MATCH:::ais
+     FORMAT:::ais
+     FORMAT:::ais
+     DECISION:::ais
+     mSYS:::ais
+     mSYS:::ais
+     mRAG:::ais
+     mRAG:::ais
+     mCTX:::ais
+     mCTX:::ais
+     mPLAYER:::ais
+     mPLAYER:::ais
+     fSYS:::ais
+     fSYS:::ais
+     fRAG:::ais
+     fRAG:::ais
+     fPLAYER:::ais
+     fPLAYER:::ais
+     FB_GEN:::fallback
+     FB_GEN:::fallback
+     RAG_GEN:::rag
+     RAG_GEN:::rag
+     DB_PLAYER:::db
+     DB_PLAYER:::db
+     DB_GAME:::db
+     DB_GAME:::db
+     DB_NPC:::db
+     DB_NPC:::db
+     DB_HISTORY:::db
+     DB_HISTORY:::db
+     EMB:::hf
+     EMB:::hf
+     DEC:::hf
+     DEC:::hf
+     LM:::hf
+     LM:::hf
+     POOL:::hf
+     POOL:::hf
+     DELTA:::hf
+     DELTA:::hf
+     FLAG:::hf
+     FLAG:::hf
+     Client:::client
+    classDef client fill:#2ECC71,stroke:#145A32,color:#fff
+    classDef gameserver fill:#3498DB,stroke:#1B4F72,color:#fff
+    classDef db fill:#E67E22,stroke:#7E5109,color:#fff
+    classDef ais fill:#95A5A6,stroke:#424949,color:#fff
+    classDef hf fill:#9B59B6,stroke:#512E5F,color:#fff
+    classDef fallback fill:#F39C12,stroke:#7E5109,color:#fff
+    classDef rag fill:#1ABC9C,stroke:#0E6251,color:#fff
 ```
 
 ---
 
-## ⚙️ AI 서버 (ai-server/)
+## ⚙️ AI 서버 (ai_server/)
 
-### 역할
+* ### 역할 & 데이터 흐름
 
-* **게임 서버와의 통신:** 플레이어의 발화와 상태 정보를 수신하고, 모델 추론을 위한 입력 데이터를 준비
-* **프롬프트 구성:** 게임 서버로부터 받은 데이터를 기반으로 모델에 입력할 프롬프트를 생성
-* **전처리:** 프롬프트의 포맷을 모델에 맞게 조정하고, 필요한 추가 정보를 삽입
-* **후처리:** 모델의 출력을 게임 서버가 처리할 수 있는 형식으로 변환
+  1. **게임 서버 요청 수신(`app.py`)**
+  
+     * 최소 입력만 와도 동작: `{ text, npc_id, player_id, ... }`
+     * 옵션: 게임 서버가 보낸 상태/컨텍스트가 부족하면 `rag/`에서 NPC 메타(예: `docs/npc_config.json`)를 조회해 보강
+  2. **전처리/프롬프트 구성(`pipeline/preprocess.py`, `utils/context_parser.py`, `manager/prompt_builder.py`)**
+  
+     * 태그/컨텍스트/플레이어 발화를 묶어 **모델 포맷**(`<SYS>`, `<CTX>`, `<PLAYER>`, `<NPC>`)으로 구성
+  3. **추론 요청(`utils/hf_client.py`, `models/fallback_model.py`, `pipeline/generator.py`)**
+     * preprocess.py에서 통과하지 못한 input은 `models/fallback_model.py`에서 fallback text 생성
+     * preprocess.py에 통과한 input은 `pipeline/generator.py` 에서 payload구성
+     * 페이로드: `prompt`, `npc_id`, `persona_tags`, `gen_params`(temperature, max\_new\_tokens 등)
+     * HF Spaces의 `/predict_main` 으로 HTTP POST
+  
+  4. **후처리(`pipeline/postprocess.py`)**
+  
+     * 모델 응답에서 \*\*대사 텍스트, delta(연속값), flag(이벤트)\*\*를 파싱/정규화
+     * 예: `flags`는 시그모이드+threshold, `delta`는 범위 클램프·라운딩
+  5. **게임 서버 응답(`schemas.py`)**
+  
+     * 표준화 JSON으로 반환
+  
+     ```json
+     {
+       "text": "NPC의 대답...",
+       "delta": {"trust": 0.10, "relationship": 0.08},
+       "flags": {"give_item": true, "npc_main_story": false, "quest_stage_change": false},
+       "meta": {"npc_id": "mother_abandoned_factory"}
+     }
+     ```
 
-### 주요 모듈
+* ### 📁 디렉토리 구조
 
-* **`dialogue_manager.py`:** 대화 흐름 관리 및 NPC 응답 생성
-* **`preprocess.py`:** 입력 데이터의 전처리 및 프롬프트 구성
-* **`postprocess.py`:** 모델 출력의 후처리 및 게임 서버와의 데이터 포맷 변환
-* **`hf_client.py`:** Hugging Face Spaces와의 통신을 위한 클라이언트 구현
+  ```bash
+  ai-server/
+  ├── app.py                  # FastAPI 엔트리포인트
+  ├── config.py               # 서버 설정 및 모델 경로 관리
+  ├── schemas.py              # 요청/응답 데이터 구조 정의
+  ├── requirements.txt        # 의존성 패키지 목록
+  
+  ├── pipeline/               # 대화 흐름 처리 모듈
+  │   ├── __init__.py
+  │   ├── preprocess.py       # 입력 전처리 및 프롬프트 구성
+  │   ├── postprocess.py      # 모델 출력 후처리 및 flag/delta 추출
+  │   └── generator.py        # 모델 추론 요청 처리
+  
+  ├── rag/                    # RAG 기반 flag 해석 모듈
+  │   ├── __init__.py
+  │   ├── rag_generator.py    # NPC별 상황에 따른 flag 텍스트 해석
+  │   └── docs/
+  │       └── npc_config.json # NPC별 flag 해석 기준 문서
+  
+  ├── utils/                  # 유틸리티 모듈
+  │   ├── __init__.py
+  │   ├── hf_client.py        # Hugging Face API 통신 클라이언트
+  │   └── context_parser.py   # 대화 맥락 파싱 및 구조화
+  
+  ├── models/                 # 모델 로딩 및 fallback 처리
+  │   └── model_loader.py     # 모델 로딩 유틸리티
+  ```
 
-### 데이터 흐름
+* ### 주요 모듈
 
-1. **게임 서버 요청 수신:** 플레이어의 발화와 상태 정보를 포함한 요청을 수신
-2. **프롬프트 생성:** `preprocess.py`를 통해 모델에 입력할 프롬프트를 생성
-3. **모델 추론:** `hf_client.py`를 사용하여 Hugging Face Spaces에 요청을 보내고 응답을 수신
-4. **후처리:** `postprocess.py`를 통해 응답을 게임 서버가 처리할 수 있는 형식으로 변환
-5. **게임 서버로 응답 전송:** 변환된 응답을 게임 서버로 전송하여 게임 상태를 업데이트
+  * **dialogue_manager.py**: 전체 대화 흐름을 제어하며, fallback 처리, 프롬프트 생성, 모델 추론, 후처리까지 담당
+  * **preprocess.py**: 플레이어 입력과 NPC 상태를 기반으로 전처리
+  * **postprocess.py**: 모델 출력에서 `<RESPONSE>`, `<FLAG>`, `<DELTA>` 태그를 파싱하고, RAG를 통해 flag를 텍스트로 해석
+  * **rag_generator.py**: NPC ID, 퀘스트 단계, flag 이름을 기반으로 문서 검색 및 텍스트 반환
+
+
+* ### 🧩 RAG 기반 Flag 해석 흐름
+
+  * 모델은 수치 기반 flag를 예측
+  * `postprocess.py`는 RAG를 통해 해당 수치를 텍스트로 해석
+  * 게임 서버는 이를 기반으로 실제 아이템 지급, 퀘스트 진행 등을 결정
+
+
+* ### 📌 RAG 문서 type별 조회·사용 매핑표
+
+| **type** | **조회 시점** | **조회 조건(filters)** | **사용 모듈/함수** | **주요 활용 목적** |
+|----------|--------------|------------------------|--------------------|--------------------|
+| `trigger_def` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:trigger_def", filters=...)` | - main 경로 조건 판정<br>- `required_text`, `required_items`, `required_actions`, `required_game_state`, `required_delta` 검사<br>- `emotion_threshold` 검사<br>- 조건 만족 시 `is_valid=True` |
+| `fallback` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:fallback", filters=...)` | - main 조건 불만족 시 fallback prompt 구성에 사용<br>- `fallback_style`(style, npc_action, npc_emotion) 포함 |
+| `forbidden_trigger_list` | **preprocess_input** | `npc_id` | `_load_forbidden_trigger_data()` | - 특수 fallback 감지 1차(키워드) / 2차(embedding 유사도) 검사<br>- `keywords` / `text` 리스트 사용 |
+| `trigger_meta` | **preprocess_input** | `npc_id`, `trigger` | `_load_trigger_meta()` | - 특수 fallback 시 action/delta 값 확정<br>- fallback_final_check에서 일치 여부 검증 |
+| `lore` | **build_main_prompt** | `npc_id`, `quest_stage` or `any` | RAG main docs에서 필터 | - main prompt의 세계관/배경 설명(LORE) 구성 |
+| `description` | **build_main_prompt** | `npc_id`, `quest_stage` | RAG main docs에서 필터 | - main prompt의 현재 상황/조건 설명(DESCRIPTION) 구성 |
+| `flag_def` | **postprocess_pipeline** | `npc_id`, `quest_stage`, `flag_name` | pre_data["rag_main_docs"]에서 필터 | - flag별 threshold, examples_positive/negative 가져오기<br>- main model 응답과 embedding 유사도 계산에 사용 |
+| `main_res_validate` | **postprocess_pipeline** | `npc_id`, `quest_stage` | pre_data["rag_main_docs"]에서 필터 | - main model 응답 최종 검증/재작성 기준 설명 텍스트 |
+| *(없음)* | **fallback_final_check** | pre_data["trigger_meta"] 직접 사용 | - | - fallback 응답이 action/delta와 의미적으로 일치하는지 검증<br>- 윤리·문화·사회적 필터링 |
+
+---
+
+* ### 📌 데이터 흐름 요약
+
+  ### **1. preprocess_input()**
+  - **trigger_def** → main 조건 판정
+  - **forbidden_trigger_list** + **trigger_meta** → 특수 fallback 감지 및 action/delta 확정
+  - **fallback** → 일반 fallback 스타일 정보
+  - **lore / description**는 여기서는 안 씀 (prompt 빌더에서 사용)
+  
+  ### **2. build_main_prompt()**
+  - **lore** + **description** → main prompt의 RAG 컨텍스트 구성
+  
+  ### **3. build_fallback_prompt()**
+  - **fallback** → fallback_style 반영
+  - **trigger_meta** → 특수 fallback 시 style/action/emotion 구체화
+  
+  ### **4. postprocess_pipeline()**
+  - **flag_def** → flag threshold + 예시 문장 가져오기
+  - **main_res_validate** → 응답 검증 기준 텍스트
+  
+  ### **5. fallback_final_check()**
+  - **trigger_meta** → action/delta와 응답 의미 일치 여부 검증
+
+
+💡 이렇게 매핑하여,  
+- 어떤 type이 어느 단계에서 쓰이는지 명확해져서 RAG 인덱스 설계와 검색 최적화가 쉬워지고  
+- 불필요한 재호출 없이 pre_data에서 재사용할 수 있습니다.
+
+
+```mermaid
+graph TD
+ModelOutput["FLAG: give_item=0.92, npc_main_story=0.87"]
+ModelOutput --> Postprocess
+Postprocess --> RAG["retrieve(npc_id:quest_stage:flag_name)"]
+RAG --> FlagText["give_item → 금목걸이 지급"]
+FlagText --> GameServer
+```
 
 ---
 
@@ -59,231 +433,84 @@ GameServer[Node.js Game Server] --npc text, env flags--> Client[Unity Client]
 
 ### 역할
 
-* **모델 호스팅:** Fine-tuned된 모델과 LoRA 어댑터를 호스팅하여 추론 서비스 제공
-* **API 엔드포인트:** AI 서버의 요청을 처리할 수 있는 RESTful API 엔드포인트 제공
+* **모델 호스팅 + API 엔드포인트**
+
+  * Base LLM(Qwen2.5-3B-Instruct) + **LoRA 어댑터**를 로드해 추론
+  * **REST 엔드포인트** 제공: `POST /predict_main` → `{ text, delta[], flags{} }` JSON 반환
+* **Gradio UI(옵션)**
+
+  * 같은 Space에서 간단한 인터랙티브 테스트 UI 제공 (버튼·텍스트박스 기반)
 
 ### 구성 요소
 
 * **`server.py`:** FastAPI를 기반으로 한 RESTful API 서버 구현
-* **`model_utils.py`:** 모델 로딩 및 추론을 위한 유틸리티 함수
-* **`requirements.txt`:** 필요한 Python 패키지 목록
+* **`model_utils.py`:** 베이스 모델 + 어댑터 로딩, 토크나이즈/생성
+* **`requirements.txt`:** 필요한 Python 패키지 목록 [`transformers`, `peft`, `accelerate`, `fastapi`/`gradio`, 등]
 
 ### 배포
 
-* **Hugging Face Spaces:** `hf-serve/` 디렉토리의 코드를 Hugging Face Spaces에 배포하여 API 엔드포인트 제공
+* **[Hugging Face Spaces](https://huggingface.co/spaces/m97j/PersonaChatEngine):** `hf-serve/` 디렉토리의 코드를 Hugging Face Spaces에 배포하여 API 엔드포인트 제공
 * **AI 서버 통합:** AI 서버는 해당 API 엔드포인트를 호출하여 NPC의 응답을 수신
 
+자세한 설명
+> 📄 [Hugging Face Spaces](https://huggingface.co/spaces/m97j/PersonaChatEngine)
+
 ---
 
-## 📊 모델 설계 및 학습 (train/)
+## 📊 모델 학습 (train/)
 
-* Colab Notebook:  [Train Model on Colab](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
-* Hugging Face Model: [HF Model](https://huggingface.co/spaces/m97j/PersonaChatEngine)
+- **데이터 구조**: JSONL (npc_id, tags, context, player_utterance, response, delta, flag)
+- **학습 방식**: QLoRA 4bit Adapter, MultiHeadTrainer (LM Loss + Delta MSE + Flag BCE)
+- **자동 브랜치 관리**: fine-tuning 완료 시 feature branch 생성 → latest 브랜치 덮어쓰기
 
-## 🛠 모델 기능
+자세한 설명
+> 📄 [Colab Notebook](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
+> 📄 [HF Model](https://huggingface.co/m97j/npc_LoRA-fps)
 
-### 1. NPC 대화 생성
 
-* 플레이어 발화(`player_utterance`)를 기반으로 NPC 응답 생성
-* NPC의 감정, 신뢰도, 관계 상태 등을 반영
-* 대화 맥락(`context`) 유지
-
-### 2. 행동 및 상태 추적
-
-* **Delta Head:** NPC 신뢰(`trust`)와 관계(`relationship`) 변화 수치 예측
-* **Flag Head:** 퀘스트 진행, 아이템 지급, 메인 스토리 종료 여부 등 이벤트 트리거
-
-### 3. 데이터 기반 학습
-
-* JSONL 데이터 구조 기반 학습
-**학습 데이터 구조:**
-
-* **형식:** JSONL
-* **구성 요소:**
-
-  * `npc_id`: NPC 고유 ID
-  * `tags`: 위치, 관계 상태, 신뢰도, 감정 상태 등 태그 정보
-  * `context`: 이전 대화 맥락
-  * `player_utterance`: 플레이어의 발화
-  * `response`: NPC의 응답
-  * `delta`: 신뢰도 및 관계도 변화량
-  * `flag`: 이벤트 트리거 목록
-
-**예시 데이터:**
-
-```json
-{
-  "npc_id": "mother_abandoned_factory",
-  "tags": {
-    "location": "abandoned_factory",
-    "quest_stage": "complete",
-    "relationship": "close_friend",
-    "trust": 0.99,
-    "npc_mood": "hopeful",
-    "player_reputation": "helpful",
-    "style": "somber"
-  },
-  "context": [
-    {"role": "player", "text": "Jason의 삼촌은 어디에 계시죠?"},
-    {"role": "npc", "text": "제 동생은 자신의 아지트에 있어요..."}
-  ],
-  "player_utterance": "네?... 수수께끼 같네요...",
-  "response": "정말 고마워요!! 이건 우리 집안의 가보인 금목걸이에요...",
-  "delta": [0.00, 0.00],
-  "flag": ["give_item", "npc_main_story"]
-}
-```
-
-### 4. QLoRA 기반 Fine-Tuning
-
-### 1. 모델 아키텍처
-
-**Base Model:** Qwen2.5-3B-Instruct
-
-**Adapter:** LoRA 기반 4bit Quantization Adapter
-
-**멀티헤드 출력 구조:**
-
-* **Delta Head:** NPC의 신뢰도(trust)와 관계도(relationship) 변화를 예측하는 회귀 모델
-* **Flag Head:** 퀘스트 진행 상태, 아이템 지급 여부 등 이벤트 트리거를 예측하는 이진 분류 모델
-
-**학습 구성:**
-
-* **Loss 함수:**
-
-  * **LM Loss:** 기존 언어 모델 학습 손실
-  * **Delta Loss (MSE):** 신뢰도 및 관계도 예측 오차
-  * **Flag Loss (BCE):** 이벤트 트리거 예측 오차
-
-* **Trainer 구현:**
-
-  * `MultiHeadTrainer` 클래스를 통해 멀티헤드 출력을 처리
-  * 각 헤드의 출력에 대해 해당하는 손실을 계산하고 합산하여 최종 손실을 도출
-
-```python
-class MultiHeadTrainer(Trainer):
-    def compute_loss(self, model, inputs, return_outputs=False):
-        labels = inputs.pop("labels")
-        delta = inputs.pop("delta")
-        flag = inputs.pop("flag")
-        outputs = model(**inputs, output_hidden_states=True)
-        last_hidden = outputs.hidden_states[-1][:, -1, :]
-        lm_loss = nn.CrossEntropyLoss(ignore_index=-100)(outputs.logits.view(-1, outputs.logits.size(-1)), labels.view(-1))
-        delta_pred = model.delta_head(last_hidden)
-        mse_loss = nn.MSELoss()(delta_pred, delta)
-        flag_pred = model.flag_head(last_hidden)
-        bce_loss = nn.BCEWithLogitsLoss()(flag_pred, flag)
-        return lm_loss + mse_loss + bce_loss
-```
 ---
 
-## 📂 디렉토리 구조
-```
+## 📦 배포 계획
 
-persona-chat-engine/
-│
-├── ai-server/        # 대화 파이프라인 관리, 게임 서버와 통신
-│   ├── app.py
-│   ├── schemas.py
-│   ├── agent_manager.py
-│   ├── dialogue_manager.py
-│   ├── preprocess.py
-│   ├── postprocess.py
-│   ├── generator.py
-│   ├── rag.py
-│   ├── config.py
-│   ├── utils/
-│   │   ├── hf_client.py
-│   │   └── model_loader.py
-│   └── requirements.txt
-│
-├── hf-serve/         # Hugging Face 모델 추론 API
-│   ├── model_utils.py
-│   ├── server.py
-│   └── requirements.txt
-│
-├── train/            # (옵션) 모델 학습 관련 자료
-│   ├── README.md     # Colab 학습 링크
-│   └── dataset/      # (옵션) json 데이터 샘플
-│
-└── docker-compose.yml
+### 1. Docker Hub 업로드
+- ai-server Docker 이미지 빌드 후 `m97j/persona-chat-engine:latest`로 푸시
+- ARM 아키텍처 기반 빌드 지원
+
+### 2. Oracle Cloud 배포
+- **선택 이유**: Always Free ARM VM (최대 24GB RAM) → ai-server 모델 로드 시 약 10GB RAM 필요
+- 현재 로컬 테스트 중 (Oracle Cloud 가입 실패: 전화번호·카드 인증 문제로 메일 문의 완료)
+
+### 3. 로컬 테스트
+- uvicorn으로 ai-server 실행
+- Swagger `/docs`에서 API 호출 테스트
+
+---
+
+## 🎥 시연 자료
+> **Swagger 기반 로컬 테스트 영상 예정**  
+
+```
+[영상 썸네일]
+▶ NPC 대화 요청 → Delta/Flag 응답 → Game-server 적용
 ```
 
 ---
 
-## 📦 설치 및 실행
-
-```bash
-git clone https://github.com/m97j/persona-chat-engine.git
-cd persona-chat-engine
-pip install -r requirements.txt
-```
-
-### 모델 로드
-
-```python
-from transformers import AutoTokenizer, AutoModelForCausalLM
-from peft import PeftModel
-
-base_model = "Qwen/Qwen2.5-3B-Instruct"
-adapter_path = "lora-output-jason-mom"
-
-tokenizer = AutoTokenizer.from_pretrained(base_model)
-model = AutoModelForCausalLM.from_pretrained(base_model)
-model = PeftModel.from_pretrained(model, adapter_path)
-```
-
-### 샘플 추론
-
-```python
-prompt = "<SYS> ... <CTX> ... </CTX> <PLAYER>저기요, Jason을 아시나요?\n<NPC>"
-inputs = tokenizer(prompt, return_tensors="pt")
-outputs = model.generate(**inputs, max_new_tokens=200)
-print(tokenizer.decode(outputs[0], skip_special_tokens=True))
-```
-
----
-## 📽 시연 영상
-
-(업데이트 예정)
----
-
-## 🖥 학습 환경
-
-* **GPU:** NVIDIA A100 / Colab GPU
-* **Framework:** PyTorch + HuggingFace Transformers
-* **Fine-Tuning:** QLoRA (LoRA Adapter)
-* **Batch Size:** 16 (Gradient Accumulation 사용)
-* **Epochs:** 3
-* **Loss 구성:** LM + Delta(MSE) + Flag(BCE)
-
----
-
-## 🎯 프로젝트 성과
-
-* NPC 신뢰도, 관계 상태, 퀘스트 이벤트 반영 대화 가능
-* QLoRA 기반 4bit Adapter 학습으로 효율적 학습 및 배포
-* Delta/Flag 헤드로 게임 내 이벤트 및 상태 변화를 동시에 처리
-* 포트폴리오용 데모 제공 가능
+## 🏁 프로젝트 성과
+- NPC 신뢰도·관계 상태·퀘스트 이벤트 반영 대화 가능
+- Delta/Flag Head로 게임 상태 변화 동시 처리
+- RAG 기반 컨텍스트 검색으로 상황별 응답 품질 향상
+- Oracle Cloud ARM 무료 인스턴스 + Docker Hub + HF Spaces 통합 배포 설계
 
 ---
 
 ## 📁 포트폴리오 연계
 
-* **FPS Game 프로젝트:** 게임 내 캐릭터 AI와 연동, 이벤트 발생 테스트
-* **Persona Chat Engine:** 대화 기반 스토리 전개, 멀티 NPC 관리
-* 이 두 프로젝트는 통합적으로 플레이어 경험 설계와 AI NPC 구현 능력을 강조
+* **[FPS Game](https://github.com/m97j/fpsgame)**:
+  * Client - 이벤트 테스트 및 게임 루프 연계
+  * game_server - ai_server의 ask/ endpoint 형식에 맞는 페이로드 생성, 통신 결과를 실제 게임 데이터(Game_DB)에 적용, Client와의 통신 담당
+* **[Persona Chat Engine](https://github.com/m97j/persona-chat-engine)**: 멀티 NPC, 스토리/퀘스트 전개 파이프라인
+* 이 두 프로젝트는 통합적으로 플레이어 경험 설계와 AI NPC 구현 능력을 강화함
 
 ---
-
-## 🔗 관련 링크
-
-* [Portfolio](https://www.github.com/m97j/portfolio)
-* [FPS Game](https://github.com/m97j/fpsgame)
-* [Persona Chat Engine](https://github.com/m97j/persona-chat-engine)
-
----
-
-
-
 
