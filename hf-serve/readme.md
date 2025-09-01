@@ -4,41 +4,46 @@ emoji: 🤖
 colorFrom: blue
 colorTo: pink
 sdk: gradio
-sdk_version: 4.0.0
-python_version: 3.10
+sdk_version: "5.44.1"
+python_version: "3.10"
 app_file: app.py
 ---
 
 # NPC 메인 모델 추론 서버 (hf-serve)
 
 이 Space는 **NPC 대화 메인 모델**의 추론 API와 간단한 Gradio UI를 제공합니다.  
-본 서버는 Hugging Face Hub에 업로드된 [Base model](https://huggingface.co/Qwen/Qwen2.5-3B)과 [LoRA adapter model](https://huggingface.co/m97j/npc_LoRA-fps)을 로드하여,  
-플레이어 발화와 게임 상태를 기반으로 NPC의 응답, 감정 변화량(delta),  
+Hugging Face Hub에 업로드된  
+[Base model](https://huggingface.co/Qwen/Qwen2.5-3B-Instruct)과
+[LoRA adapter model](https://huggingface.co/m97j/npc_LoRA-fps)을 로드하여,  
+플레이어 발화와 게임 상태를 기반으로 NPC의 응답, 감정 변화량(delta),
 플래그 확률/임계값을 예측합니다.
 
 ---
 
 ## 🚀 주요 기능
-- **FastAPI 엔드포인트** `/predict_main/`  
+- **API 엔드포인트** `/predict_main`  
   - JSON payload로 prompt를 받아 모델 추론 결과 반환
-- **Gradio UI** `/ui`  
+- **웹 UI** `/ui`  
   - NPC ID, 위치, 플레이어 발화를 입력해 실시간 응답 확인
 - **커스텀 헤드 예측**  
-  - delta_head: trust / relationship 변화량
-  - flag_head: 각 flag의 확률
-  - flag_threshold_head: 각 flag의 임계값
+  - `delta_head`: trust / relationship 변화량
+  - `flag_head`: 각 flag의 확률
+  - `flag_threshold_head`: 각 flag의 임계값
+- **모델 실시간 업데이트**  
+  - Colab 학습 후 `latest` 브랜치 업로드 → `/ping_reload` 호출 시 즉시 재로드
 
 ---
 
 ## 📂 디렉토리 구조
 ```
 hf-serve/
- ├─ app.py           # FastAPI + Gradio UI
- ├─ inference.py     # 모델 추론 로직
- ├─ model_loader.py  # 모델/토크나이저 로드
- ├─ flags.json       # flag index → name 매핑
- ├─ requirements.txt # 의존성 패키지
- └─ README.md        # (현재 문서)
+ ├─ app.py             # Gradio UI + API 라우팅
+ ├─ inference.py       # 모델 추론 로직
+ ├─ model_loader.py    # 모델/토크나이저 로드
+ ├─ utils_prompt.py    # prompt 생성 함수
+ ├─ flags.json         # flag index → name 매핑
+ ├─ requirements.txt   # 의존성 패키지
+ └─ README.md          # (현재 문서)
 ```
 
 ---
@@ -88,7 +93,38 @@ NPC 메인 모델에 프롬프트를 입력하고 응답·상태 변화를 예�
 
 ---
 
-💡 **일반적인 LLM 추론과의 차이점**  
+## 📜 Prompt 포맷
+모델은 학습 시 아래와 같은 구조의 prompt를 사용합니다.
+
+```
+<SYS>
+NPC_ID={npc_id}
+NPC_LOCATION={npc_location}
+TAGS:
+ quest_stage={quest_stage}
+ relationship={relationship}
+ trust={trust}
+ npc_mood={npc_mood}
+ player_reputation={player_reputation}
+ style={style}
+</SYS>
+<RAG>
+LORE: ...
+DESCRIPTION: ...
+</RAG>
+<PLAYER_STATE>
+...
+</PLAYER_STATE>
+<CTX>
+...
+</CTX>
+<PLAYER>...
+<STATE>
+<NPC>
+```
+---
+
+## 💡 **일반적인 LLM 추론과의 차이점**  
 이 서버는 단순히 텍스트를 생성하는 것에 그치지 않고,  
 `<STATE>` 토큰 기반 상태 벡터를 추출하여 커스텀 헤드에서 **감정 변화량(delta)**과  
 **플래그 확률/임계값**을 동시에 예측합니다.  
@@ -137,12 +173,67 @@ NPC 메인 모델에 프롬프트를 입력하고 응답·상태 변화를 예�
   ```
   → 다양성과 자연스러움 확보 [main model 추론시에 사용]
 
+hf-serve에서는 자연스러운 대화/창작용의 파라미터 예를 그대로 사용했습니다.
 
 ---
 
-## 🔗 관련 리포지토리
-- **전체 프로젝트 개요 & AI 서버 코드 설명**: [GitHub - persona-chat-engine](https://github.com/m97j/persona-chat-engine)
-- **모델 어댑터 파일(HF Hub)**: [Hugging Face Model Repo](https://huggingface.co/m97j/npc_LoRA-fps)
+## 🌐 API & UI 차이
+
+| 경로 | 입력 형식 | 내부 처리 |
+|------|-----------|-----------|
+| `/predict_main` | 완성된 prompt 문자열 | 그대로 추론 |
+| `/ui` | NPC ID, Location, Utterance | `build_webtest_prompt()`로 prompt 생성 후 추론 |
+
+---
+
+## 📌 API 사용 예시
+
+### 요청
+```json
+POST /api/predict_main
+{
+  "session_id": "abc123",
+  "npc_id": "mother_abandoned_factory",
+  "prompt": "<SYS>...<NPC>",
+  "max_tokens": 200
+}
+```
+
+### 응답
+```json
+{
+  "session_id": "abc123",
+  "npc_id": "mother_abandoned_factory",
+  "npc_response": "그건 정말 놀라운 이야기군요.",
+  "deltas": { "trust": 0.42, "relationship": -0.13 },
+  "flags": { "give_item": 0.87, "end_npc_main_story": 0.02 },
+  "thresholds": { "give_item": 0.65, "end_npc_main_story": 0.5 }
+}
+```
+
+---
+
+## 🔄 모델 업데이트 흐름
+1. Colab에서 학습 완료
+2. Hugging Face Hub `latest` 브랜치에 업로드
+3. Colab에서 `/api/ping_reload` 호출
+4. Space가 최신 모델 재다운로드 & 로드
+
+---
+
+## 🛠 실행 방법
+
+### 로컬 실행
+```bash
+git clone https://huggingface.co/spaces/m97j/PersonaChatEngine
+cd PersonaChatEngine
+pip install -r requirements.txt
+python app.py
+```
+
+### Hugging Face Space에서 실행
+- 웹 UI: `https://m97j-PersonaChatEngine.hf.space/ui`
+- API: `POST https://m97j-PersonaChatEngine.hf.space/api/predict_main`
 
 ---
 
@@ -150,6 +241,17 @@ NPC 메인 모델에 프롬프트를 입력하고 응답·상태 변화를 예�
 - Python 3.10
 - FastAPI, Gradio, Transformers, PEFT, Torch
 - GPU 지원 시 추론 속도 향상
+---
 
+## 💡 비용 최적화 팁
+- Space Settings → Hardware에서 Free CPU로 전환 시 과금 없음
+- GPU 사용 시 테스트 후 Stop 버튼으로 Space 중지
+- 48시간 요청 없으면 자동 sleep
+
+---
+
+## 🔗 관련 리포지토리
+- **전체 프로젝트 개요 & AI 서버 코드**: [GitHub - persona-chat-engine](https://github.com/m97j/persona-chat-engine)
+- **모델 어댑터 파일(HF Hub)**: [Hugging Face Model Repo](https://huggingface.co/m97j/npc_LoRA-fps)
 
 ---
