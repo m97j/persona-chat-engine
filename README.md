@@ -2,30 +2,35 @@
 # Persona Chat Engine – AI NPC Dialogue System 🎭
 
 [![GitHub stars](https://img.shields.io/github/stars/m97j/persona-chat-engine)](https://github.com/m97j/persona-chat-engine)
+[![HF Space](https://img.shields.io/badge/HF%20Spaces(ai_server)-Live-blue)](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)
+[![HF Space](https://img.shields.io/badge/HF%20Spaces(hf_serve)-Live-blue,)](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
+[![HF Model](https://img.shields.io/badge/HF%20Model-npc_LoRA--fps-ff69b4)](https://huggingface.co/m97j/npc_LoRA-fps)
+[![Colab](https://img.shields.io/badge/Colab-Notebook-yellow)](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
 
 
 ## 📑 목차
 - [📌 개요](#-개요)
-- [🧭 아키텍처](#-아키텍처)
-- [⚙️ AI 서버 (ai-server/)](#%EF%B8%8F-ai-서버-ai_server)
-- [🚀 Hugging Face Serve (hf-serve/)](#-hugging-face-spaces-hf-serve)
-- [📊 모델 학습 (train/)](#-모델-학습-train)
-- [📦 배포 계획](#-배포-계획)
-- [🎥 시연 자료](#-시연-자료)
+- [🧭 아키텍처 & 프로젝트 구조도](#-아키텍처--프로젝트-구조도)
+- [⚙️ AI 서버 (ai-server/)](#%EF%B8%8F-ai-server--요약)
+- [🚀 Hugging Face Serve (hf-serve/)](#-hf-serve--hugging-face-spaces-추론-서버)
+- [📊 모델 학습 (train/)](#-train--모델-학습)
+- [🛳️ 배포 개요 (HF Spaces, Dockerfile 기반)](#%EF%B8%8F-배포-개요-hf-spaces-dockerfile-기반)
+- [🎥 시연 & 결과](#-시연--결과)
 - [🏁 프로젝트 성과](#-프로젝트-성과)
 
 ---
 
 ## 📌 개요
-**Persona Chat Engine**은 게임 내 NPC(Non-Player Character)와의 상호작용을 위한 AI 대화 엔진입니다.  
-플레이어의 선택/행동, NPC 상태를 반영해 자연스러운 대사와 퀘스트 진행을 생성하며, **Delta/Flag** 기반의 상태 변화(신뢰·관계)와 이벤트 트리거를 함께 예측합니다.
 
-- **목표:** 게임 환경에서 몰입감 있는 AI NPC 대화와 퀘스트 반응 생성
-- **핵심 기술:** Transformer 기반 LLM, QLoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), 커스텀 프롬프트 포맷, RAG 기반 flag 해석
+**Persona Chat Engine**은 게임 내 NPC 상호작용을 위한 AI 대화 엔진입니다.
+플레이어 선택/행동과 NPC 상태를 반영해 자연스러운 대사와 함께 \*\*Delta/Flag(신뢰·관계·이벤트 트리거)\*\*를 예측합니다.
+
+* **핵심 기술**: Transformer 기반 LLM, (Q)LoRA 파인튜닝, 멀티헤드 학습(Delta/Flag), RAG 기반 해석
+* **결과물**: 텍스트 응답 + 상태 변화(연속값) + 이벤트 플래그(멀티라벨)
 
 ---
 
-## 🧭 아키텍처
+## 🧭 아키텍처 & 프로젝트 구조도
 
 * ### 모델 아키텍처
 ```mermaid
@@ -295,206 +300,93 @@ flowchart RL
 
 ---
 
-## ⚙️ AI 서버 (ai_server/)
 
-* ### 역할 & 데이터 흐름
-
-  1. **게임 서버 요청 수신(`app.py`)**
-  
-     * 최소 입력만 와도 동작: `{ text, npc_id, player_id, ... }`
-     * 옵션: 게임 서버가 보낸 상태/컨텍스트가 부족하면 `rag/`에서 NPC 메타(예: `docs/npc_config.json`)를 조회해 보강
-  2. **전처리/프롬프트 구성(`pipeline/preprocess.py`, `utils/context_parser.py`, `manager/prompt_builder.py`)**
-  
-     * 태그/컨텍스트/플레이어 발화를 묶어 **모델 포맷**(`<SYS>`, `<CTX>`, `<PLAYER>`, `<NPC>`)으로 구성
-  3. **추론 요청(`utils/hf_client.py`, `models/fallback_model.py`, `pipeline/generator.py`)**
-     * preprocess.py에서 통과하지 못한 input은 `models/fallback_model.py`에서 fallback text 생성
-     * preprocess.py에 통과한 input은 `pipeline/generator.py` 에서 payload구성
-     * 페이로드: `prompt`, `npc_id`, `persona_tags`, `gen_params`(temperature, max\_new\_tokens 등)
-     * HF Spaces의 `/predict_main` 으로 HTTP POST
-  
-  4. **후처리(`pipeline/postprocess.py`)**
-  
-     * 모델 응답에서 \*\*대사 텍스트, delta(연속값), flag(이벤트)\*\*를 파싱/정규화
-     * 예: `flags`는 시그모이드+threshold, `delta`는 범위 클램프·라운딩
-  5. **게임 서버 응답(`schemas.py`)**
-  
-     * 표준화 JSON으로 반환
-  
-     ```json
-     {
-       "text": "NPC의 대답...",
-       "delta": {"trust": 0.10, "relationship": 0.08},
-       "flags": {"give_item": true, "npc_main_story": false, "quest_stage_change": false},
-       "meta": {"npc_id": "mother_abandoned_factory"}
-     }
-     ```
-
-* ### 📁 디렉토리 구조
-
-  ```bash
-  ai-server/
-  ├── app.py                  # FastAPI 엔트리포인트
-  ├── config.py               # 서버 설정 및 모델 경로 관리
-  ├── schemas.py              # 요청/응답 데이터 구조 정의
-  ├── requirements.txt        # 의존성 패키지 목록
-  
-  ├── pipeline/               # 대화 흐름 처리 모듈
-  │   ├── __init__.py
-  │   ├── preprocess.py       # 입력 전처리 및 프롬프트 구성
-  │   ├── postprocess.py      # 모델 출력 후처리 및 flag/delta 추출
-  │   └── generator.py        # 모델 추론 요청 처리
-  
-  ├── rag/                    # RAG 기반 flag 해석 모듈
-  │   ├── __init__.py
-  │   ├── rag_generator.py    # NPC별 상황에 따른 flag 텍스트 해석
-  │   └── docs/
-  │       └── npc_config.json # NPC별 flag 해석 기준 문서
-  
-  ├── utils/                  # 유틸리티 모듈
-  │   ├── __init__.py
-  │   ├── hf_client.py        # Hugging Face API 통신 클라이언트
-  │   └── context_parser.py   # 대화 맥락 파싱 및 구조화
-  
-  ├── models/                 # 모델 로딩 및 fallback 처리
-  │   └── model_loader.py     # 모델 로딩 유틸리티
-  ```
-
-* ### 주요 모듈
-
-  * **dialogue_manager.py**: 전체 대화 흐름을 제어하며, fallback 처리, 프롬프트 생성, 모델 추론, 후처리까지 담당
-  * **preprocess.py**: 플레이어 입력과 NPC 상태를 기반으로 전처리
-  * **postprocess.py**: 모델 출력에서 `<RESPONSE>`, `<FLAG>`, `<DELTA>` 태그를 파싱하고, RAG를 통해 flag를 텍스트로 해석
-  * **rag_generator.py**: NPC ID, 퀘스트 단계, flag 이름을 기반으로 문서 검색 및 텍스트 반환
+## 📁 루트 디렉토리별 개요
 
 
-* ### 🧩 RAG 기반 Flag 해석 흐름
+### ⚙️ `ai-server/` — **요약**
 
-  * 모델은 수치 기반 flag를 예측
-  * `postprocess.py`는 RAG를 통해 해당 수치를 텍스트로 해석
-  * 게임 서버는 이를 기반으로 실제 아이템 지급, 퀘스트 진행 등을 결정
-
-
-* ### 📌 RAG 문서 type별 조회·사용 매핑표
-
-| **type** | **조회 시점** | **조회 조건(filters)** | **사용 모듈/함수** | **주요 활용 목적** |
-|----------|--------------|------------------------|--------------------|--------------------|
-| `trigger_def` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:trigger_def", filters=...)` | - main 경로 조건 판정<br>- `required_text`, `required_items`, `required_actions`, `required_game_state`, `required_delta` 검사<br>- `emotion_threshold` 검사<br>- 조건 만족 시 `is_valid=True` |
-| `fallback` | **preprocess_input** | `npc_id`, `quest_stage` | `retrieve(f"{npc_id}:fallback", filters=...)` | - main 조건 불만족 시 fallback prompt 구성에 사용<br>- `fallback_style`(style, npc_action, npc_emotion) 포함 |
-| `forbidden_trigger_list` | **preprocess_input** | `npc_id` | `_load_forbidden_trigger_data()` | - 특수 fallback 감지 1차(키워드) / 2차(embedding 유사도) 검사<br>- `keywords` / `text` 리스트 사용 |
-| `trigger_meta` | **preprocess_input** | `npc_id`, `trigger` | `_load_trigger_meta()` | - 특수 fallback 시 action/delta 값 확정<br>- fallback_final_check에서 일치 여부 검증 |
-| `lore` | **build_main_prompt** | `npc_id`, `quest_stage` or `any` | RAG main docs에서 필터 | - main prompt의 세계관/배경 설명(LORE) 구성 |
-| `description` | **build_main_prompt** | `npc_id`, `quest_stage` | RAG main docs에서 필터 | - main prompt의 현재 상황/조건 설명(DESCRIPTION) 구성 |
-| `flag_def` | **postprocess_pipeline** | `npc_id`, `quest_stage`, `flag_name` | pre_data["rag_main_docs"]에서 필터 | - flag별 threshold, examples_positive/negative 가져오기<br>- main model 응답과 embedding 유사도 계산에 사용 |
-| `main_res_validate` | **postprocess_pipeline** | `npc_id`, `quest_stage` | pre_data["rag_main_docs"]에서 필터 | - main model 응답 최종 검증/재작성 기준 설명 텍스트 |
-| *(없음)* | **fallback_final_check** | pre_data["trigger_meta"] 직접 사용 | - | - fallback 응답이 action/delta와 의미적으로 일치하는지 검증<br>- 윤리·문화·사회적 필터링 |
+* **역할**: 게임 서버 요청 수신(FastAPI) → 전처리 → HF Spaces 추론 호출 → 후처리(Delta/Flag) → 결과 반환
+* **구성**: `app.py`(엔드포인트), `pipeline/`(pre/postprocess, generator), `rag/`(조건·메타 문서), `utils/`(HF 클라이언트)
+* **배포**: (자세한 런타임 설명은 **HF Spaces README**로 이동)
+  → \*\*레포 루트의 `Dockerfile`\*\*로 Spaces가 **직접 빌드/실행**하며, **Git push 시 자동 재빌드/재시작**됨
+* **세부 사항**: 👉 **[HF Spaces 페이지 README에서 보기](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)**
 
 ---
 
-* ### 📌 데이터 흐름 요약
+### 🚀 `hf-serve/` — **Hugging Face Spaces (추론 서버)**
 
-  ### **1. preprocess_input()**
-  - **trigger_def** → main 조건 판정
-  - **forbidden_trigger_list** + **trigger_meta** → 특수 fallback 감지 및 action/delta 확정
-  - **fallback** → 일반 fallback 스타일 정보
-  - **lore / description**는 여기서는 안 씀 (prompt 빌더에서 사용)
-  
-  ### **2. build_main_prompt()**
-  - **lore** + **description** → main prompt의 RAG 컨텍스트 구성
-  
-  ### **3. build_fallback_prompt()**
-  - **fallback** → fallback_style 반영
-  - **trigger_meta** → 특수 fallback 시 style/action/emotion 구체화
-  
-  ### **4. postprocess_pipeline()**
-  - **flag_def** → flag threshold + 예시 문장 가져오기
-  - **main_res_validate** → 응답 검증 기준 텍스트
-  
-  ### **5. fallback_final_check()**
-  - **trigger_meta** → action/delta와 응답 의미 일치 여부 검증
+* **역할**: **Base LLM(Qwen2.5-3B-Instruct)** + **LoRA 어댑터** 로드 후 **REST API** 제공 (`POST /predict_main`)
+* **핵심 포인트**
 
+  * `model_utils.py`: 토크나이즈/생성 + LoRA 병합/적용
+  * `server.py`: FastAPI/Gradio(옵션) 엔드포인트
+  * `requirements.txt`: 추론 서버 경량 의존성
+* **세부 사항**: 
+  👉 [Live Space](https://huggingface.co/spaces/m97j/PersonaChatEngine) & [상세 문서](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve/blob/main/README.md)
+  👉 [모델 카드](https://huggingface.co/m97j/npc_LoRA-fps)
 
-💡 이렇게 매핑하여,  
-- 어떤 type이 어느 단계에서 쓰이는지 명확해져서 RAG 인덱스 설계와 검색 최적화가 쉬워지고  
-- 불필요한 재호출 없이 pre_data에서 재사용할 수 있습니다.
+---
 
+### 📊 `train/` — **모델 학습**
+
+* **데이터**: JSONL (`npc_id`, `tags`, `context`, `player_utterance`, `response`, `delta`, `flag`)
+* **학습**: **LoRA(QLoRA 4bit)**, **MultiHeadTrainer** (LM Loss + Delta Huber + Flag BCE + Threshold MSE)
+* **산출물**: LoRA 어댑터, 추가 헤드(`delta_head.pt`, `flag_head.pt`, `threshold_head.pt`), `flags.json`, `thresholds.json`
+* **브랜치 전략**: 자동 **feature/** 증가 + `latest` 덮어쓰기
+* **세부 사항**: 👉 [**Colab Notebook**](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
+
+---
+
+## 🛳️ 배포 개요 (HF Spaces, Dockerfile 기반)
 
 ```mermaid
-graph TD
-ModelOutput["FLAG: give_item=0.92, npc_main_story=0.87"]
-ModelOutput --> Postprocess
-Postprocess --> RAG["retrieve(npc_id:quest_stage:flag_name)"]
-RAG --> FlagText["give_item → 금목걸이 지급"]
-FlagText --> GameServer
+flowchart LR
+  Repo[GitHub Repo] -- 연결 --> HF[Hugging Face Spaces]
+  HF -- 루트 Dockerfile로 빌드 --> Image[Container]
+  Image --> Run[Space Runtime]
+  Repo -- git push --> HF:::hot
+  classDef hot fill:#E67E22,color:#fff,stroke:#A04000
 ```
 
 ---
 
-## 🚀 Hugging Face Spaces (hf-serve/)
+## 🧩 기술 하이라이트
 
-### 역할
-
-* **모델 호스팅 + API 엔드포인트**
-
-  * Base LLM(Qwen2.5-3B-Instruct) + **LoRA 어댑터**를 로드해 추론
-  * **REST 엔드포인트** 제공: `POST /predict_main` → `{ text, delta[], flags{} }` JSON 반환
-* **Gradio UI(옵션)**
-
-  * 같은 Space에서 간단한 인터랙티브 테스트 UI 제공 (버튼·텍스트박스 기반)
-
-### 구성 요소
-
-* **`server.py`:** FastAPI를 기반으로 한 RESTful API 서버 구현
-* **`model_utils.py`:** 베이스 모델 + 어댑터 로딩, 토크나이즈/생성
-* **`requirements.txt`:** 필요한 Python 패키지 목록 [`transformers`, `peft`, `accelerate`, `fastapi`/`gradio`, 등]
-
-### 배포
-
-* **[Hugging Face Spaces](https://huggingface.co/spaces/m97j/PersonaChatEngine):** `hf-serve/` 디렉토리의 코드를 Hugging Face Spaces에 배포하여 API 엔드포인트 제공
-* **AI 서버 통합:** AI 서버는 해당 API 엔드포인트를 호출하여 NPC의 응답을 수신
-
-자세한 설명
-> 📄 [Hugging Face Spaces](https://huggingface.co/spaces/m97j/PersonaChatEngine)
+* **멀티헤드 학습**: LM(토큰 예측)과 **Delta/Flag** 분기 동시 최적화 → 게임 상태 반영형 응답
+* **STATE-token Pooling**: `<STATE>` 토큰 기반 임베딩 풀링 → 상태 헤드 입력 일관성
+* **RAG 해석**: Flag 점수/임계값을 문서 기반 조건과 매칭해 **게임 액션 텍스트**로 변환
+* **포스트프로세싱 검증**: threshold 튜닝, macro/micro F1 및 AUROC/AUPRC로 다각도 평가
+* **운영**: **Spaces 자가 빌드** 파이프라인으로 운영 복잡도↓, 변경 반영 속도↑
 
 ---
 
-## 📊 모델 학습 (train/)
+## 🎥 시연 & 결과
 
-- **데이터 구조**: JSONL (npc_id, tags, context, player_utterance, response, delta, flag)
-- **학습 방식**: QLoRA 4bit Adapter, MultiHeadTrainer (LM Loss + Delta MSE + Flag BCE)
-- **자동 브랜치 관리**: fine-tuning 완료 시 feature branch 생성 → latest 브랜치 덮어쓰기
-
-자세한 설명
-> 📄 [Colab Notebook](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
-> 📄 [HF Model](https://huggingface.co/m97j/npc_LoRA-fps)
-
+* 업데이트 예정
 
 ---
 
-## 📦 배포 계획
+## 🗺️ 로드맵
 
-### 1. Docker Hub 업로드
-- ai-server Docker 이미지 빌드 후 `m97j/persona-chat-engine:latest`로 푸시
-- ARM 아키텍처 기반 빌드 지원
-
-### 2. Oracle Cloud 배포
-- **선택 이유**: Always Free ARM VM (최대 24GB RAM) → ai-server 모델 로드 시 약 10GB RAM 필요
-- 현재 로컬 테스트 중 (Oracle Cloud 가입 실패: 전화번호·카드 인증 문제로 메일 문의 완료)
-
-### 3. 로컬 테스트
-- uvicorn으로 ai-server 실행
-- Swagger `/docs`에서 API 호출 테스트
+* Spaces 멀티 모델/브랜치 롤아웃 (Blue/Green)
+* 게임 서버 A/B 테스트 자동화
+* LoRA 양자화/온디맨드 로딩 최적화
 
 ---
 
-## 🎥 시연 자료
-> **Swagger 기반 로컬 테스트 영상 예정**  
+## 📎 참고 링크
 
-```
-[영상 썸네일]
-▶ NPC 대화 요청 → Delta/Flag 응답 → Game-server 적용
-```
+* **HF Spaces (라이브 & 상세 문서)**:  
+  * [ai_server](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)
+  * [hf-serve](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
+* **Model Card**: 
+  * [HF Hub](https://huggingface.co/m97j/npc_LoRA-fps)
+* **Model Structure & Training & inference test**: 
+  * [colab notebook](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
 
 ---
+
 
 ## 🏁 프로젝트 성과
 - NPC 신뢰도·관계 상태·퀘스트 이벤트 반영 대화 가능
@@ -504,7 +396,7 @@ FlagText --> GameServer
 
 ---
 
-## 📁 포트폴리오 연계
+## 📁 프로젝트 연계
 
 * **[FPS Game](https://github.com/m97j/fpsgame)**:
   * Client - 이벤트 테스트 및 게임 루프 연계
