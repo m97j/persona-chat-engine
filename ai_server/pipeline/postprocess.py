@@ -148,7 +148,7 @@ def _adjust_delta_with_rag_and_embedding(
     return {"trust": trust, "relationship": rel}
 
 # ----------------------------
-# Flag 보정 로직(확장)
+# Flag 보정 로직
 # ----------------------------
 
 def adjust_flags_with_rag_and_embedding(

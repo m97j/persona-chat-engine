@@ -1,32 +1,25 @@
+from pathlib import Path
 import os
 
-# Hugging Face Spaces serve URL (공개 설정이므로 직접 주소 사용 가능)
-HF_SERVE_URL = os.getenv(
-    "HF_SERVE_URL",
-    "https://m97j-PersonaChatEngine.hf.space"
-)
+BASE_DIR = Path(__file__).resolve().parent  # ai_server/
 
-# 요청 타임아웃 (초 단위)
+# Hugging Face Token
+HF_TOKEN = os.getenv("HF_TOKEN")
+
+# Hugging Face Serve URL
+HF_SERVE_URL = os.getenv("HF_SERVE_URL", "https://m97j-personachatengine-hf-serve.hf.space/api")
+
+# Hugging Face Serve Timeout (초)
 HF_TIMEOUT = float(os.getenv("HF_TIMEOUT", "25"))
 
-# RAG 항상 사용 (토글이 아니라 고정 사용)
-RAG_ENABLED = True
 
-# 생성 파라미터 기본값 (요청마다 override 가능)
-GENERATION_CONFIG = {
-    "max_new_tokens": int(os.getenv("GEN_MAX_NEW_TOKENS", "220")),
-    "temperature": float(os.getenv("GEN_TEMPERATURE", "0.7")),
-    "top_p": float(os.getenv("GEN_TOP_P", "0.9")),
-    "repetition_penalty": float(os.getenv("GEN_REPETITION_PENALTY", "1.1")),
-    "do_sample": True
-}
+# 모델 이름
+FALLBACK_MODEL_NAME = os.getenv("FALLBACK_MODEL_NAME", "skt/ko-gpt-trinity-1.2B-v0.5")
+EMBEDDER_MODEL_NAME = os.getenv("EMBEDDER_MODEL_NAME", "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2")
 
-'''
-# 모델 정보 (추후 확장 가능)
-MODEL_INFO = {
-    "base_model": "meta-llama/Meta-Llama-3-8B",
-    "adapter": "m97j/PersonaAdapter-v1",
-    "serve_mode": "hf_spaces",  # 또는 "local", "api"
-}
+# 모델 디렉토리
+FALLBACK_MODEL_DIR = Path(os.getenv("FALLBACK_MODEL_DIR", BASE_DIR / "models" / "fallback-npc-model"))
+EMBEDDER_MODEL_DIR = Path(os.getenv("EMBEDDER_MODEL_DIR", BASE_DIR / "models" / "sentence-embedder"))
 
-'''
+# ChromaDB 디렉토리
+CHROMA_DIR = Path(os.getenv("CHROMA_DIR", "/app/rag/chroma_DB"))

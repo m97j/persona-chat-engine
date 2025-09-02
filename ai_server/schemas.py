@@ -16,12 +16,19 @@ class DialogueTurn(BaseModel):
     npc: str
 
 class Context(BaseModel):
-    require: Optional[Dict[str, Any]] = Field(default_factory=dict, description="pre 1차 조건 판단용 필수/선택 요소")
-    player_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="플레이어 현재 상태")
-    game_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="게임 전역 상태")
-    npc_state: Optional[Dict[str, Any]] = Field(default_factory=dict, description="DB 최신 NPC 상태")
+    require: Optional[Dict[str, Any]] = Field(None, description="pre 1차 조건 판단용 필수/선택 요소[rag 문서에 작성됨]")
+    player_state: Dict[str, Any] = Field(..., description="플레이어 현재 상태")
+    game_state: Dict[str, Any] = Field(..., description="게임 전역 상태")
+    npc_state: Dict[str, Any] = Field(..., description="DB 최신 NPC 상태")
     npc_config: Optional[NPCConfig] = Field(None, description="RAG 기반 설계 정보")
     dialogue_history: Optional[List[DialogueTurn]] = Field(default_factory=list, description="최근 대화 히스토리")
+
+
+class AskReq(BaseModel):
+    session_id: str = Field(..., description="세션 고유 ID")
+    npc_id: str = Field(..., description="NPC 고유 ID")
+    user_input: str = Field(..., description="플레이어 입력 문장")
+    context: Context = Field(..., description="게임 및 NPC 상태 정보")
 
 class AskRes(BaseModel):
     session_id: str

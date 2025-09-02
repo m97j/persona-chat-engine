@@ -1,45 +1,35 @@
+import asyncio
+from pathlib import Path
+import markdown
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
-from manager.dialogue_manager import handle_dialogue
-from rag.rag_generator import chroma_initialized, load_game_docs_from_disk, add_docs
+from fastapi.templating import Jinja2Templates
 from contextlib import asynccontextmanager
-from models.model_loader import load_emotion_model, load_fallback_model, load_embedder
+
+from manager.dialogue_manager import handle_dialogue
+from rag.rag_manager import chroma_initialized, load_game_docs_from_disk, add_docs, set_embedder
+from models.model_loader import load_fallback_model, load_embedder
 from schemas import AskReq, AskRes
-from pathlib import Path
-from rag.rag_generator import set_embedder
+from config import (
+    FALLBACK_MODEL_NAME, FALLBACK_MODEL_DIR,
+    EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR,
+    HF_TOKEN, BASE_DIR
+)
 
-# 모델 이름
-EMOTION_MODEL_NAME = "tae898/emoberta-base-ko"
-FALLBACK_MODEL_NAME = "skt/ko-gpt-trinity-1.2B-v0.5"
-EMBEDDER_MODEL_NAME = "sentence-transformers/paraphrase-multilingual-MiniLM-L12-v2"
+templates = Jinja2Templates(directory="templates")
+model_ready = False
 
-# 절대 경로 기준 모델 디렉토리 설정
-BASE_DIR = Path(__file__).resolve().parent  # ai_server/
-EMOTION_MODEL_DIR = BASE_DIR / "models" / "emotion-classification-model"
-FALLBACK_MODEL_DIR = BASE_DIR / "models" / "fallback-npc-model"
-EMBEDDER_MODEL_DIR = BASE_DIR / "models" / "sentence-embedder"
-
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Emotion
-    emo_tokenizer, emo_model = load_emotion_model(EMOTION_MODEL_NAME, EMOTION_MODEL_DIR)
-    app.state.emotion_tokenizer = emo_tokenizer
-    app.state.emotion_model = emo_model
-
-    # Fallback
-    fb_tokenizer, fb_model = load_fallback_model(FALLBACK_MODEL_NAME, FALLBACK_MODEL_DIR)
+async def load_models(app: FastAPI):
+    global model_ready
+    print("🚀 모델 로딩 시작...")
+    fb_tokenizer, fb_model = load_fallback_model(FALLBACK_MODEL_NAME, FALLBACK_MODEL_DIR, token=HF_TOKEN)
     app.state.fallback_tokenizer = fb_tokenizer
     app.state.fallback_model = fb_model
 
-    # Embedder
-    embedder = load_embedder(EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR)
+    embedder = load_embedder(EMBEDDER_MODEL_NAME, EMBEDDER_MODEL_DIR, token=HF_TOKEN)
     app.state.embedder = embedder
-    set_embedder(embedder)  # 추가
+    set_embedder(embedder)
 
-    print("✅ 모든 모델 로딩 완료")
-
-    # RAG 초기화
     docs_path = BASE_DIR / "rag" / "docs"
     if not chroma_initialized():
         docs = load_game_docs_from_disk(str(docs_path))
@@ -48,14 +38,17 @@ async def lifespan(app: FastAPI):
     else:
         print("🔄 RAG DB 이미 초기화됨")
 
-    yield  # 앱 실행
+    model_ready = True
+    print("✅ 모든 모델 로딩 완료")
 
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    asyncio.create_task(load_models(app))
+    yield
     print("🛑 서버 종료 중...")
-
 
 app = FastAPI(title="ai-server", lifespan=lifespan)
 
-# CORS 설정 (game-server에서 요청 가능하도록)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["https://fpsgame-rrbc.onrender.com"],
@@ -64,32 +57,54 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.get("/", include_in_schema=False)
+async def root(request: Request):
+    md_path = Path(__file__).parent / "README.md"
+    md_content = md_path.read_text(encoding="utf-8")
+
+    start_tag = "<!-- app-tab:start -->"
+    end_tag = "<!-- app-tab:end -->"
+    if start_tag in md_content and end_tag in md_content:
+        short_md = md_content.split(start_tag)[1].split(end_tag)[0].strip()
+    else:
+        short_md = md_content  # fallback: 전체 내용
+
+    html_from_md = markdown.markdown(short_md)
+    return templates.TemplateResponse("index.html", {"request": request, "readme_content": html_from_md})
+
+@app.get("/status")
+async def status():
+    return {"ready": model_ready}
+
+@app.post("/wake")
+async def wake(request: Request):
+    session_id = (await request.json()).get("session_id", "unknown")
+    print(f"📡 Wake signal received for session: {session_id}")
+    if not model_ready:
+        asyncio.create_task(load_models(app))
+    return {"status": "awake", "model_ready": model_ready}
 
 @app.post("/ask", response_model=AskRes)
 async def ask(request: Request, req: AskReq):
-    context = req.context or {}
-    npc_config = context.npc_config
-
-    if not (req.session_id and req.npc_id and req.user_input and npc_config):
+    if not model_ready:
+        raise HTTPException(status_code=503, detail="Model not ready")
+    if not req.context:
+        raise HTTPException(status_code=400, detail="missing context")
+    if not (req.session_id and req.npc_id and req.user_input):
         raise HTTPException(status_code=400, detail="missing fields")
 
-    result = await handle_dialogue(
+    context = req.context
+    npc_config_dict = context.npc_config.model_dump() if context.npc_config else None
+
+    return await handle_dialogue(
         request=request,
         session_id=req.session_id,
         npc_id=req.npc_id,
         user_input=req.user_input,
-        context=context.dict(),
-        npc_config=npc_config.dict()
+        context=context.model_dump(),
+        npc_config=npc_config_dict
     )
-    return result
 
-
-@app.post("/wake")
-async def wake(request: Request):
-    body = await request.json()
-    session_id = body.get("session_id", "unknown")
-    print(f"📡 Wake signal received for session: {session_id}")
-    return {"status": "awake", "session_id": session_id}
 
 
 '''

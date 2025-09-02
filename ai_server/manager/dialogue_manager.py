@@ -1,9 +1,9 @@
 from fastapi import Request
 from pipeline.preprocess import preprocess_input
 from pipeline.generator import generate_response
-from pipeline.postprocess import postprocess_pipeline, fallback_final_check
+from pipeline.postprocess import postprocess_fallback, postprocess_main
 from models.fallback_model import generate_fallback_response
-from prompt_builder import build_main_prompt, build_fallback_prompt  # 수정된 prompt 빌더 사용
+from .prompt_builder import build_main_prompt, build_fallback_prompt
 
 async def handle_dialogue(
     request: Request,
@@ -29,27 +29,9 @@ async def handle_dialogue(
         # fallback model 호출
         fb_raw = await generate_fallback_response(request, fb_prompt)
 
-        # fallback 전용 최종 검증
-        fb_checked = await fallback_final_check(
-            request=request,
-            fb_response=fb_raw,
-            player_utt=pre["player_utterance"],
-            npc_config=pre["tags"],
-            action_delta=pre.get("trigger_meta", {})
-        )
+        return_payload_fb = postprocess_fallback(request, pre, fb_raw)
 
-        # payload 구성 후 반환
-        return {
-            "session_id" : session_id,
-            "npc_output_text": fb_checked,
-            "flags": {},  # fallback은 flag/delta 이미 pre에서 확정
-            "deltas": pre.get("trigger_meta", {}).get("delta", {}),
-            "meta": {
-                "npc_id": pre["npc_id"],
-                "quest_stage": pre["game_state"].get("quest_stage", "default"),
-                "location": pre["game_state"].get("location", context.get("location", "unknown"))
-            }
-        }
+        return return_payload_fb
 
     # 3. Main 경로
     main_prompt = build_main_prompt(pre, session_id, npc_id)
@@ -58,11 +40,10 @@ async def handle_dialogue(
     result = await generate_response(session_id, npc_id, main_prompt, max_tokens=200)
 
     # postprocess_pipeline에서 최종 payload 생성
-    return_payload = await postprocess_pipeline(
+    return_payload_main = await postprocess_main(
         request=request,
         pre_data=pre,           # preprocess 결과 전체 전달
         model_payload=result,   # main model 출력
-        context=context
     )
 
-    return return_payload
+    return return_payload_main

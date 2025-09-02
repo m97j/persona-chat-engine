@@ -1,7 +1,6 @@
 import json, torch
 from fastapi import Request
 from manager.agent_manager import agent_manager
-from models.emotion_model import detect_emotion
 from models.fallback_model import generate_fallback_response
 from utils.context_parser import ContextParser
 from sentence_transformers import util
@@ -33,6 +32,19 @@ def _semantic_match_embedder(embedder, user_input: str, trigger_texts: list, thr
     score_val = float(max_score.item())
     matched_text = trigger_texts[int(idx.item())]
     return (score_val >= threshold, score_val, matched_text)
+
+async def extract_emotion_via_fallback(request: Request, user_input: str) -> str:
+    prompt = (
+        "다음 문장의 화자 감정을 한 단어 또는 짧은 문장으로 설명하시오.\n\n"
+        f"[문장]\n{user_input}\n\n"
+        "지시:\n- 감정을 직접적으로 표현하지 않아도 문맥을 통해 추론하시오.\n"
+        "- 가능한 경우 감정의 강도나 뉘앙스도 반영하시오.\n"
+        "- 예: 분노, 슬픔, 혼란, 기대, 무관심, 초조함 등\n"
+        "- 단어 하나 또는 짧은 문장으로만 출력하시오.\n\n"
+        "정답:"
+    )
+    response = await generate_fallback_response(request, prompt)
+    return response.strip()
 
 async def _llm_trigger_check(request: Request, user_input: str, label_list: list) -> bool:
     if not label_list:
@@ -72,7 +84,7 @@ async def preprocess_input(
     context: dict
 ) -> dict:
     parser = ContextParser(context)
-    emotion = await detect_emotion(request, user_input)  # async 처리
+    emotion = await extract_emotion_via_fallback(request, user_input)
 
     require_items = context.get("require", {}).get("items", [])
     require_actions = context.get("require", {}).get("actions", [])
