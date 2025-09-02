@@ -310,7 +310,7 @@ flowchart RL
 * **구성**: `app.py`(엔드포인트), `pipeline/`(pre/postprocess, generator), `rag/`(조건·메타 문서), `utils/`(HF 클라이언트)
 * **배포**: (자세한 런타임 설명은 **HF Spaces README**로 이동)
   → \*\*레포 루트의 `Dockerfile`\*\*로 Spaces가 **직접 빌드/실행**하며, **Git push 시 자동 재빌드/재시작**됨
-* **세부 사항**: 👉 **[HF Spaces 페이지 README에서 보기](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)**
+* **세부 사항**: 👉 **[HF Spaces\[ai_server\]](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)**
 
 ---
 
@@ -323,8 +323,8 @@ flowchart RL
   * `server.py`: FastAPI/Gradio(옵션) 엔드포인트
   * `requirements.txt`: 추론 서버 경량 의존성
 * **세부 사항**: 
-  👉 [Live Space](https://huggingface.co/spaces/m97j/PersonaChatEngine) & [상세 문서](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve/blob/main/README.md)
-  👉 [모델 카드](https://huggingface.co/m97j/npc_LoRA-fps)
+  👉 [HF Spaces\[hf-serve\]](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
+  👉 [HF Hub\[model card\]](https://huggingface.co/m97j/npc_LoRA-fps)
 
 ---
 
