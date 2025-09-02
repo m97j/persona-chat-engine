@@ -1,29 +1,25 @@
 import gradio as gr
-from inference import run_inference, reload_model  # reload_model은 모델 재로딩 함수
-from utils_prompt import build_webtest_prompt
+from inference import run_inference
+from modules.ui_components import build_ui
+from webtest_prompt import build_webtest_prompt
 
-# UI에서 호출할 함수
+
+# Web Test UI 호출 함수
 def gradio_infer(npc_id, npc_location, player_utt):
     prompt = build_webtest_prompt(npc_id, npc_location, player_utt)
     result = run_inference(prompt)
     return result["npc_output_text"], result["deltas"], result["flags_prob"]
 
-# API 호출용 함수
-def api_infer(session_id, npc_id, prompt, max_tokens=200):
-    result = run_inference(prompt)
-    return {
-        "session_id": session_id,
-        "npc_id": npc_id,
-        "npc_response": result["npc_output_text"],
-        "deltas": result["deltas"],
-        "flags": result["flags_prob"],
-        "thresholds": result["flags_thr"]
-    }
+# ping: 상태 확인 및 깨우기
+def ping():
+    # 모델이 로드되어 있는지 확인, 없으면 로드
+    global wrapper, tokenizer, model, flags_order
+    if 'model' not in globals() or model is None:
+        from model_loader import ModelWrapper
+        wrapper = ModelWrapper()
+        tokenizer, model, flags_order = wrapper.get()
+    return {"status": "awake"}
 
-# 모델 재로딩용 함수
-def ping_reload():
-    reload_model(branch="latest")  # latest 브랜치에서 재다운로드 & 로드
-    return {"status": "reloaded"}
 
 with gr.Blocks() as demo:
     gr.Markdown("## NPC Main Model Inference")
@@ -37,21 +33,22 @@ with gr.Blocks() as demo:
         flags = gr.JSON(label="Flags Probabilities")
         btn = gr.Button("Run Inference")
 
-        # UI 버튼 클릭 시 API 엔드포인트도 자동 생성
+        # Web Test 전용 (api_name 제거)
         btn.click(
             fn=gradio_infer,
             inputs=[npc_id, npc_loc, player_utt],
-            outputs=[npc_resp, deltas, flags],
-            api_name="predict_main"  # /api/predict_main 엔드포인트 생성
+            outputs=[npc_resp, deltas, flags]
         )
 
-    # 별도의 UI 없이 API만 제공하는 엔드포인트
-    gr.Button("Reload Model").click(
-        fn=ping_reload,
+    # ping 엔드포인트 (상태 확인/깨우기)
+    gr.Button("Ping Server").click(
+        fn=ping,
         inputs=[],
         outputs=[],
-        api_name="ping_reload"  # /api/ping_reload 엔드포인트 생성
+        api_name="ping"
     )
 
+
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)  
+    demo = build_ui()
+    demo.launch(server_name="0.0.0.0", server_port=7860)

@@ -1,7 +1,11 @@
 from typing import Dict, Any
 
 def build_webtest_prompt(npc_id: str, npc_location: str, player_utt: str) -> str:
-    # 웹 테스트에서는 최소 필드만 채운 pre dict 생성
+    """
+    Web Test 전용: 최소 입력값(NPC ID, Location, Player 발화)으로
+    모델 학습 포맷에 맞는 prompt 문자열을 생성.
+    실제 API/게임 서비스 경로에서는 사용하지 않음.
+    """
     pre = {
         "tags": {
             "npc_id": npc_id,
@@ -14,15 +18,18 @@ def build_webtest_prompt(npc_id: str, npc_location: str, player_utt: str) -> str
             "style": ""
         },
         "player_state": {},
-        "rag_main_docs": [],  # 웹 테스트에서는 RAG 문서 없음
-        "context": [],        # 대화 히스토리 없음
+        "rag_main_docs": [],
+        "context": [],
         "player_utterance": player_utt
     }
-    # session_id는 웹 테스트에서는 의미 없으니 빈 값
-    return build_main_prompt(pre, session_id="", npc_id=npc_id)
+    return _assemble_prompt_for_model(pre)
 
+def _assemble_prompt_for_model(pre: Dict[str, Any]) -> str:
+    """
+    Web Test 전용 내부 함수:
+    pre dict → 모델 입력 포맷 문자열(<SYS>~<NPC>)
+    """
 
-def build_main_prompt(pre: Dict[str, Any], session_id: str, npc_id: str) -> str:
     tags = pre.get("tags", {})
     ps = pre.get("player_state", {})
     rag_docs = pre.get("rag_main_docs", [])

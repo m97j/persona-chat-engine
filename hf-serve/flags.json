@@ -1,7 +1,7 @@
 {
   "ALL_FLAGS": [
     "give_item",
-    "end_npc_main_story",
+    "give_hint",
     "quest_stage_change",
     "change_game_state",
     "change_player_state",

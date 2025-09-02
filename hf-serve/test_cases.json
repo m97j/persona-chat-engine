@@ -1,0 +1,100 @@
+[
+  {
+    "id": "case1",
+    "npc_id": "mother_abandoned_factory",
+    "npc_location": "map1",
+    "description": "폐공장에서 NPC와 대화하는 장면",
+    "player_utterance": "아! 머리가!!! 갑자기 기억이 떠올랐어요...",
+    "tags": {
+      "quest_stage": "in_progress",
+      "relationship": 0.35,
+      "trust": 0.35,
+      "npc_mood": "grief",
+      "player_reputation": "helpful",
+      "style": "emotional"
+    },
+    "lore": "이 공장은 수십 년 전 화재로 폐쇄되었다.",
+    "context": [
+      {"role": "player", "text": "사실 이 공장을 돌아다니면서..."},
+      {"role": "npc", "text": "혹시 그 파티에 Jason도 있었나요..."}
+    ]
+  },
+  {
+    "id": "case2",
+    "npc_id": "blacksmith_village_center",
+    "npc_location": "village_square",
+    "description": "마을 대장장이와 무기 수리에 대해 대화하는 장면",
+    "player_utterance": "이 검을 다시 쓸 수 있게 고쳐줄 수 있나요?",
+    "tags": {
+      "quest_stage": "not_started",
+      "relationship": 0.2,
+      "trust": 0.4,
+      "npc_mood": "neutral",
+      "player_reputation": "unknown",
+      "style": "direct"
+    },
+    "lore": "마을의 대장장이는 세대를 이어 무기를 제작해왔다.",
+    "context": [
+      {"role": "npc", "text": "오, 여행자군. 무슨 일로 왔나?"}
+    ]
+  },
+  {
+    "id": "case3",
+    "npc_id": "forest_hermit",
+    "npc_location": "deep_forest",
+    "description": "숲속 은둔자와 희귀 약초에 대해 대화하는 장면",
+    "player_utterance": "혹시 이 근처에서 푸른빛 약초를 본 적 있나요?",
+    "tags": {
+      "quest_stage": "in_progress",
+      "relationship": 0.5,
+      "trust": 0.6,
+      "npc_mood": "curious",
+      "player_reputation": "friendly",
+      "style": "polite"
+    },
+    "lore": "은둔자는 숲속 깊은 곳에서 약초와 버섯을 연구한다.",
+    "context": [
+      {"role": "player", "text": "안녕하세요, 혹시 잠시 이야기 나눌 수 있을까요?"},
+      {"role": "npc", "text": "여기까지 오는 사람은 드물지요."}
+    ]
+  },
+  {
+    "id": "case4",
+    "npc_id": "captain_port_authority",
+    "npc_location": "harbor",
+    "description": "항구 관리관과 출항 허가에 대해 대화하는 장면",
+    "player_utterance": "이 배를 오늘 안에 출항시켜야 합니다. 허가를 부탁드립니다.",
+    "tags": {
+      "quest_stage": "urgent",
+      "relationship": 0.45,
+      "trust": 0.3,
+      "npc_mood": "suspicious",
+      "player_reputation": "neutral",
+      "style": "persuasive"
+    },
+    "lore": "항구 관리관은 모든 선박의 출항을 엄격히 관리한다.",
+    "context": [
+      {"role": "npc", "text": "서류는 다 준비됐나?"}
+    ]
+  },
+  {
+    "id": "case5",
+    "npc_id": "young_apprentice_mage",
+    "npc_location": "mage_tower_library",
+    "description": "마법사 견습생과 고대 주문서에 대해 대화하는 장면",
+    "player_utterance": "이 주문서에 적힌 문장을 해석할 수 있나요?",
+    "tags": {
+      "quest_stage": "research",
+      "relationship": 0.6,
+      "trust": 0.7,
+      "npc_mood": "excited",
+      "player_reputation": "scholar",
+      "style": "inquisitive"
+    },
+    "lore": "마법사 탑의 도서관에는 수백 년 된 고서들이 보관되어 있다.",
+    "context": [
+      {"role": "player", "text": "이 책은 굉장히 오래된 것 같아요."},
+      {"role": "npc", "text": "맞아요! 이런 건 정말 드물죠."}
+    ]
+  }
+]
