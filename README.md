@@ -118,8 +118,8 @@ flowchart RL
  subgraph HFServe["hf-serve /predict_main"]
         EMB["Token Embedding + RoPE"]
         DEC["Decoder-only Transformer × N
-        (LoRA: q,k,v,o + gate/up/down proj)
-        $$[Attention(Q,K,V)=softmax(QK^T/√d_k)·V]$$"]
+        __________``(LoRA:_q,k,v,o_+_gate/up/down_proj)``__________
+        [Attention(Q,K,V)=softmax(QK^T/√d_k)·V]"]
         LM["LM Head → Response Token"]
         POOL["STATE-token Pooling"]
         DELTA["Delta Head [-1,1] (tanh)"]
