@@ -11,9 +11,9 @@ jobs:
   deploy-gradio:
     runs-on: ubuntu-latest
     if: |
-      contains(join(github.event.commits.*.modified), 'neuro/') ||
-      contains(join(github.event.commits.*.added), 'neuro/') ||
-      contains(join(github.event.commits.*.removed), 'neuro/')
+      contains(join(github.event.head_commit.modified), 'neuro/') ||
+      contains(join(github.event.head_commit.added), 'neuro/') ||
+      contains(join(github.event.head_commit.removed), 'neuro/')
     steps:
       - uses: actions/checkout@v3
 
@@ -31,9 +31,9 @@ jobs:
   deploy-docker:
     runs-on: ubuntu-latest
     if: |
-      contains(join(github.event.commits.*.modified), 'symbolic/') ||
-      contains(join(github.event.commits.*.added), 'symbolic/') ||
-      contains(join(github.event.commits.*.removed), 'symbolic/')
+      contains(join(github.event.head_commit.modified), 'symbolic/') ||
+      contains(join(github.event.head_commit.added), 'symbolic/') ||
+      contains(join(github.event.head_commit.removed), 'symbolic/')
     steps:
       - uses: actions/checkout@v3
 
