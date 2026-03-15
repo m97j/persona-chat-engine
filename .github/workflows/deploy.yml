@@ -34,7 +34,20 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_HUB_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          hf upload m97j/neuro-engine neuro/ .
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^neuro/")
+
+          ARGS=""
+          for FILE in $CHANGED_FILES; do
+            BASENAME=$(basename "$FILE")
+            ARGS="$ARGS --files $FILE:$BASENAME"
+          done
+
+          hf api commit \
+            --repo-id m97j/neuro-engine \
+            --repo-type space \
+            --commit-message "$HF_HUB_COMMIT_MESSAGE" \
+            $ARGS
+
 
   deploy-docker:
     runs-on: ubuntu-latest
@@ -62,4 +75,16 @@ jobs:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
           HF_HUB_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          hf upload m97j/symbolic-processor symbolic/ .
+          CHANGED_FILES=$(git diff --name-only HEAD~1 HEAD | grep "^symbolic/")
+
+          ARGS=""
+          for FILE in $CHANGED_FILES; do
+            BASENAME=$(basename "$FILE")
+            ARGS="$ARGS --files $FILE:$BASENAME"
+          done
+
+          hf api commit \
+            --repo-id m97j/symbolic-processor \
+            --repo-type space \
+            --commit-message "$HF_HUB_COMMIT_MESSAGE" \
+            $ARGS
