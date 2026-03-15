@@ -4,7 +4,7 @@ transformers>=4.45.0
 peft>=0.12.0
 datasets
 
-# gradio
+# Web Interface SDK
 gradio==6.9.0
 
 # additional dependencies
