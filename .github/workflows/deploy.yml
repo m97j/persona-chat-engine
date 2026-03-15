@@ -1,0 +1,34 @@
+name: Deploy to Hugging Face Spaces
+
+on:
+  push:
+    branches: [ main ]   # deployment occurs only on pushes to the main branch
+
+jobs:
+  deploy-gradio:
+    runs-on: ubuntu-latest
+    if: github.event.head_commit.message != '[skip ci]'   # deployment occurs only if the commit message does not contain [skip ci]
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: pip install huggingface_hub
+      - name: Push to Hugging Face Space (Gradio)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
+          huggingface-cli upload neuro/ --repo m97j/neuro-engine
+
+  deploy-docker:
+    runs-on: ubuntu-latest
+    if: github.event.head_commit.message != '[skip ci]'
+    steps:
+      - uses: actions/checkout@v3
+      - name: Install dependencies
+        run: pip install huggingface_hub
+      - name: Push to Hugging Face Space (Docker)
+        env:
+          HF_TOKEN: ${{ secrets.HF_TOKEN }}
+        run: |
+          huggingface-cli login --token $HF_TOKEN
+          huggingface-cli upload symbolic/ --repo m97j/symbolic-processor
