@@ -1,4 +1,4 @@
-# Python 캐시 및 빌드 파일
+# Python cache and build files
 __pycache__/
 *.py[cod]
 *.so
@@ -8,21 +8,21 @@ dist/
 build/
 venv/
 
-# 환경 설정
+# environment variables and logs
 .env
 *.log
 
-# 모델 디렉토리 무시
+# ignore models and databases
 ai_server/models/emotion-classification-model/
 ai_server/models/fallback-npc-model/
 ai_server/models/sentence-embedder/
 ai_server/chroma_db/
 
-# IDE 설정
+# IDE files
 .vscode/
 .idea/
 
-# OS 파일
+# OS files
 .DS_Store
 Thumbs.db
 
