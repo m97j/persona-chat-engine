@@ -32,10 +32,9 @@ jobs:
         if: steps.neuro_changed.outputs.changed == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          hf upload neuro/ \
-            --repo m97j/neuro-engine \
-            --token $HF_TOKEN
+          hf upload m97j/neuro-engine neuro/ .
 
   deploy-docker:
     runs-on: ubuntu-latest
@@ -61,7 +60,6 @@ jobs:
         if: steps.symbolic_changed.outputs.changed == 'true'
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
+          HF_HUB_COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
         run: |
-          hf upload symbolic/ \
-            --repo m97j/symbolic-processor \
-            --token $HF_TOKEN
+          hf upload m97j/symbolic-processor symbolic/ .
