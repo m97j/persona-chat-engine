@@ -33,7 +33,7 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python -m huggingface_hub upload neuro/ \
+          huggingface_hub upload neuro/ \
             --repo m97j/neuro-engine \
             --token $HF_TOKEN
 
@@ -62,6 +62,6 @@ jobs:
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          python -m huggingface_hub upload symbolic/ \
+          huggingface_hub upload symbolic/ \
             --repo m97j/symbolic-processor \
             --token $HF_TOKEN
