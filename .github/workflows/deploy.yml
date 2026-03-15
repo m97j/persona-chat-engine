@@ -2,33 +2,48 @@ name: Deploy to Hugging Face Spaces
 
 on:
   push:
-    branches: [ main ]   # deployment occurs only on pushes to the main branch
+    branches: [ main ]
+    paths:
+      - "neuro/**"
+      - "symbolic/**"
 
 jobs:
   deploy-gradio:
     runs-on: ubuntu-latest
-    if: github.event.head_commit.message != '[skip ci]'   # deployment occurs only if the commit message does not contain [skip ci]
+    if: |
+      contains(join(github.event.commits.*.modified), 'neuro/') ||
+      contains(join(github.event.commits.*.added), 'neuro/') ||
+      contains(join(github.event.commits.*.removed), 'neuro/')
     steps:
       - uses: actions/checkout@v3
+
       - name: Install dependencies
-        run: pip install huggingface_hub
-      - name: Push to Hugging Face Space (Gradio)
+        run: pip install "huggingface_hub[cli]"
+
+      - name: Deploy Gradio Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
-          huggingface-cli upload neuro/ --repo m97j/neuro-engine
+          python -m huggingface_hub upload neuro/ \
+            --repo m97j/neuro-engine \
+            --token $HF_TOKEN
 
   deploy-docker:
     runs-on: ubuntu-latest
-    if: github.event.head_commit.message != '[skip ci]'
+    if: |
+      contains(join(github.event.commits.*.modified), 'symbolic/') ||
+      contains(join(github.event.commits.*.added), 'symbolic/') ||
+      contains(join(github.event.commits.*.removed), 'symbolic/')
     steps:
       - uses: actions/checkout@v3
+
       - name: Install dependencies
-        run: pip install huggingface_hub
-      - name: Push to Hugging Face Space (Docker)
+        run: pip install "huggingface_hub[cli]"
+
+      - name: Deploy Docker Space
         env:
           HF_TOKEN: ${{ secrets.HF_TOKEN }}
         run: |
-          huggingface-cli login --token $HF_TOKEN
-          huggingface-cli upload symbolic/ --repo m97j/symbolic-processor
+          python -m huggingface_hub upload symbolic/ \
+            --repo m97j/symbolic-processor \
+            --token $HF_TOKEN
