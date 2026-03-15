@@ -1,16 +1,15 @@
-# Persona Chat Engine – AI NPC Dialogue System 🎭
+# Cognitive World-Interaction Engine: Stateful Game World Orchestrator
 
-[![GitHub stars](https://img.shields.io/github/stars/m97j/persona-chat-engine)](https://github.com/m97j/persona-chat-engine)
-[![HF Space](https://img.shields.io/badge/HF%20Spaces(ai_server)-Live-blue)](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)
-[![HF Space](https://img.shields.io/badge/HF%20Spaces(hf_serve)-Live-blue,)](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
-[![HF Model](https://img.shields.io/badge/HF%20Model-npc_LoRA--fps-ff69b4)](https://huggingface.co/m97j/npc_LoRA-fps)
-[![Colab](https://img.shields.io/badge/Colab-Notebook-yellow)](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
+[![GitHub stars](https://img.shields.io/github/stars/m97j/cwie)](https://github.com/m97j/cwie)
+[![HF Space](https://img.shields.io/badge/Demo(HF_Space)-Symbolic_Processor-blue)](https://huggingface.co/spaces/m97j/symbolic-processor)
+[![HF Space](https://img.shields.io/badge/Demo(HF_Space)-Neuro_Engine-blue,)](https://huggingface.co/spaces/m97j/neuro-engine)
+[![HF Model](https://img.shields.io/badge/HF%20Model_Card-CWIE_Core-ff69b4)](https://huggingface.co/m97j/cwie-core)
 
 ## 📑 Table of Contents
 - [📌 Overview](#-Overview)
 - [🧭 Architecture & Project Structure](#-Architecture--Project-Structure)
-- [⚙️ AI Server (ai-server/)](#%EF%B8%8F-ai-server--summary)
-- [🚀 Hugging Face Inference Serve (hf-serve/)](#-hf-serve--hugging-face-spaces-inference-server)
+- [⚙️ Neuro Engine (neuro/)](#-neuro--inference-server)
+- [🚀 Symbolic Processor (symbolic/)](#%EF%B8%8F-symbolic--summary)
 - [📊 Model Training (train/)](#-train--model-training)
 - [🛳️ Deployment Overview (HF Spaces, Dockerfile-based)](#%EF%B8%8F-Deployment-Overview-hf-spaces-dockerfile-based)
 - [🎥 Demo & Results](#-Demo--Results)
@@ -20,7 +19,7 @@
 
 ## 📌 Overview
 
-**Persona Chat Engine** is an AI conversation engine for in-game NPC interactions.
+**Cognitive World-Interaction Engine** is an AI conversation engine for in-game NPC interactions.
 It predicts Delta/Flag (trust, relationship, and event triggers) along with natural dialogue based on player choices/actions and NPC states.
 
 * **Core Technologies**: Transformer-based LLM, (Q)LoRA fine-tuning, multi-head learning (Delta/Flag), RAG-based interpretation
@@ -28,34 +27,9 @@ It predicts Delta/Flag (trust, relationship, and event triggers) along with natu
 
 ---
 
-## 🧭 Architecture & Project Structure
+## 🧭 System Architecture
 
-* ### Model Architecture
-```mermaid
-flowchart LR
-subgraph Input
-U["Player Utterance"] --> Tok["Tokenizer"]
-end
-
-Tok --> Emb["Token Embedding + RoPE"]
-
-subgraph DecoderOnly["Decoder-only Transformer xN (LoRA on Attention/FFN)"]
-Attn["Multi-Head Attention (Causal, GQA)"]
-R1["Residual + RMSNorm"]
-FFN["SwiGLU Feed-Forward"] 
-R2["Residual + RMSNorm"] 
-end 
-
-Emb --> Attn --> R1 --> FFN --> R2 
-
-R2 --> LMHead["LM Head → Next Token"] 
-R2 --> Pool["STATE-token Pooling"] 
-Pool --> DeltaHead["Delta Head (2: trust, relationship) [-1,1]"] 
-Pool --> FlagHead["Flag Head (NUM_FLAGS, scores 0..1)"] 
-
-classDef op fill:#eef,stroke:#669,stroke-width:1px;
-```
-* ### Integrated architecture of all projects (Persona Chat Engine + FpsGame)
+* ### Integrated architecture of system
 ```mermaid
 ---
 config:
@@ -204,19 +178,9 @@ flowchart RL
 ```
 ---
 
-## 📁 Overview by Root Directory
+## 📁 Overview by Directory
 
-### ⚙️ `ai-server/` — **Summary**
-
-* **Role**: Receive game server request (FastAPI) → Preprocessing → Call HF Spaces inference → Postprocessing (Delta/Flag) → Return result
-* **Configuration**: `app.py` (endpoint), `pipeline/` (pre/postprocess, generator), `rag/` (conditions/meta documentation), `utils/` (HF client)
-* **Deployment**: (For detailed runtime descriptions, see **HF Spaces README**)
-→ \*\*Spaces **builds/runs** directly from the `Dockerfile` in the repo root, and **automatically rebuilds/restarts** upon **Git push**
-* **Details**: 👉 **[HF Spaces\[ai_server\]](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)**
-
----
-
-### 🚀 `hf-serve/` — **Hugging Face Spaces (Inference Server)**
+### ⚙️ `neuro/` — **Inference Server**
 
 * **Role**: Loads **Base LLM (Qwen2.5-3B-Instruct)** + **LoRA Adapter** and provides **REST API** (`POST /predict_main`)
 * **Key Points**
@@ -225,8 +189,18 @@ flowchart RL
 * `server.py`: FastAPI/Gradio (optional) endpoint
 * `requirements.txt`: Inference Server lightweight dependency
 * **Details**:
-👉 [HF Spaces\[hf-serve\]](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
-👉 [HF Hub\[model card\]](https://huggingface.co/m97j/npc_LoRA-fps)
+👉 [HF Spaces\[neuro-engine\]](https://huggingface.co/spaces/m97j/neuro-engine)
+👉 [Model Card](https://huggingface.co/m97j/cwie-core)
+
+---
+
+### 🚀 `symbolic/` — **Summary**
+
+* **Role**: Receive game server request (FastAPI) → Preprocessing → Call HF Spaces inference → Postprocessing (Delta/Flag) → Return result
+* **Configuration**: `app.py` (endpoint), `pipeline/` (pre/postprocess, generator), `rag/` (conditions/meta documentation), `utils/` (HF client)
+* **Deployment**: (For detailed runtime descriptions, see **HF Spaces README**)
+→ \*\*Spaces **builds/runs** directly from the `Dockerfile` in the repo root, and **automatically rebuilds/restarts** upon **Git push**
+* **Details**: 👉 **[HF Spaces\[symbolic-processor\]](https://huggingface.co/spaces/m97j/symbolic-processor)**
 
 ---
 
@@ -236,6 +210,33 @@ flowchart RL
 * **Training**: **LoRA(QLoRA 4bit)**, **MultiHeadTrainer** (LM Loss + Delta Huber + Flag BCE + Threshold MSE)
 * **Output**: LoRA adapter, additional heads (`delta_head.pt`, `flag_head.pt`, `threshold_head.pt`), `flags.json`, `thresholds.json`
 * **Branch Strategy**: Automatically increment **feature/** + overwrite `latest`
+
+* ### Model Architecture
+```mermaid
+flowchart LR
+subgraph Input
+U["Player Utterance"] --> Tok["Tokenizer"]
+end
+
+Tok --> Emb["Token Embedding + RoPE"]
+
+subgraph DecoderOnly["Decoder-only Transformer xN (LoRA on Attention/FFN)"]
+Attn["Multi-Head Attention (Causal, GQA)"]
+R1["Residual + RMSNorm"]
+FFN["SwiGLU Feed-Forward"] 
+R2["Residual + RMSNorm"] 
+end 
+
+Emb --> Attn --> R1 --> FFN --> R2 
+
+R2 --> LMHead["LM Head → Next Token"] 
+R2 --> Pool["STATE-token Pooling"] 
+Pool --> DeltaHead["Delta Head (2: trust, relationship) [-1,1]"] 
+Pool --> FlagHead["Flag Head (NUM_FLAGS, scores 0..1)"] 
+
+classDef op fill:#eef,stroke:#669,stroke-width:1px;
+```
+
 * **Details**: 👉 [**Colab Notebook**](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
 
 ---
@@ -265,27 +266,7 @@ classDef hot fill:#E67E22,color:#fff,stroke:#A04000
 
 ## 🎥 Demo & Results
 
-* To be updated
-
----
-
-## 🗺️ Roadmap
-
-* Spaces Multi-Model/Branch Rollout (Blue/Green)
-* Automated game server A/B testing
-* LoRA quantization/on-demand loading optimization
-
----
-
-## 📎 Reference Links
-
-* **HF Spaces (Live & Detailed Documentation)**:
-  * [ai_server](https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server)
-  * [hf-serve](https://huggingface.co/spaces/m97j/PersonaChatEngine_hf-serve)
-* **Model Card**:
-  * [HF Hub](https://huggingface.co/m97j/npc_LoRA-fps)
-* **Model Structure & Training & Inference Test**:
-  * [colab notebook](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
+* Scheduled for future update
 
 ---
 
@@ -297,12 +278,16 @@ classDef hot fill:#E67E22,color:#fff,stroke:#A04000
 
 ---
 
-## 📁 Project Links
+## 📎 Reference Links
 
-* **[FPS Game](https://github.com/m97j/fpsgame)**:
-  * Client - Event testing and game loop integration
-  * game_server - Generates payloads in the ai_server's ask/endpoint format, applies communication results to actual game data (Game_DB), and handles client communication
-* **[Persona Chat Engine](https://github.com/m97j/persona-chat-engine)**: Multi-NPC, story/quest development pipeline
-  * ​​These two projects integrate to enhance player experience design and AI NPC implementation capabilities.
+* **HF Spaces (Live Demo & Detailed Documentation)**:
+  * [neuro-engine](https://huggingface.co/spaces/m97j/neuro-engine)
+  * [symbolic-processor](https://huggingface.co/spaces/m97j/symbolic-processor)
+* **Model Card**:
+  * [Hugging Face Model](https://huggingface.co/m97j/cwie-core)
+* **Research & Training Notebook**:
+  * [colab notebook](https://colab.research.google.com/drive/1_-qH8kdoU2Jj58TdaSnswHex-BFefInq?usp=sharing)
 
 ---
+
+
