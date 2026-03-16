@@ -1,104 +1,123 @@
 <!DOCTYPE html>
 <html>
-  <head>
-    <meta charset="utf-8">
-    <title>PersonaChatEngine AI Server</title>
-    <style>
-      /* 다크모드 기본 스타일 */
-      body {
-        font-family: 'Segoe UI', Arial, sans-serif;
-        margin: 0;
-        background-color: #0d1117;
-        color: #e6edf3;
-      }
-      header {
-        background-color: #161b22;
-        padding: 20px 40px;
-        text-align: center;
-        border-bottom: 1px solid #30363d;
-      }
-      header h1 {
-        margin: 0;
-        font-size: 1.8em;
-        background: linear-gradient(90deg, #58a6ff, #a371f7);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-      }
-      header p {
-        margin: 5px 0 0;
-        color: #8b949e;
-      }
-      main {
-        max-width: 900px;
-        margin: 40px auto;
-        background-color: #161b22;
-        padding: 30px;
-        border-radius: 12px;
-        box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-        border: 1px solid #30363d;
-      }
-      h1, h2, h3 {
-        color: #58a6ff;
-      }
-      p, ul {
-        line-height: 1.6;
-      }
-      ul {
-        padding-left: 20px;
-      }
-      /* 버튼 스타일 */
-      a.button {
-        display: inline-block;
-        margin: 15px 10px 0 0;
-        padding: 12px 20px;
-        background: linear-gradient(135deg, #58a6ff, #a371f7);
-        color: white;
-        text-decoration: none;
-        border-radius: 8px;
-        font-weight: bold;
-        transition: transform 0.2s ease, box-shadow 0.2s ease;
-        box-shadow: 0 4px 14px rgba(88, 166, 255, 0.4);
-      }
-      a.button:hover {
-        transform: translateY(-2px);
-        box-shadow: 0 6px 20px rgba(88, 166, 255, 0.6);
-      }
-      .button-container {
-        display: flex;
-        justify-content: center; 
-        gap: 25px;             
-        margin-top: 20px;
-      }
 
-      footer {
-        text-align: center;
-        font-size: 0.85em;
-        color: #8b949e;
-        margin: 40px 0 20px;
-      }
-      /* 링크 색상 */
-      a {
-        color: #58a6ff;
-      }
-      a:hover {
-        text-decoration: underline;
-      }
-    </style>
-  </head>
-  <body>
-    <header>
-      <h1>PersonaChatEngine AI Server</h1>
-      <p>게임 내 NPC 대화 엔진 API</p>
-    </header>
-    <main>
-      {{ readme_content|safe }}
-      <div class="button-container">
-        <a class="button" href="/docs" target="_blank">🚀 API 테스트하기</a>
-        <a class="button" href="https://huggingface.co/spaces/m97j/PersonaChatEngine_ai_server/blob/main/README.md" target="_blank">📄 상세 문서 보기</a>
-      </div>
-    </main>
-    <footer>
-      &copy; 2025 PersonaChatEngine Project
-    </footer>
-  </body>
+<head>
+  <meta charset="utf-8">
+  <title>CWIE Symbolic Processor</title>
+  <style>
+    /* dark mode default styles */
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      margin: 0;
+      background-color: #0d1117;
+      color: #e6edf3;
+    }
+
+    header {
+      background-color: #161b22;
+      padding: 20px 40px;
+      text-align: center;
+      border-bottom: 1px solid #30363d;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 1.8em;
+      background: linear-gradient(90deg, #58a6ff, #a371f7);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+
+    header p {
+      margin: 5px 0 0;
+      color: #8b949e;
+    }
+
+    main {
+      max-width: 900px;
+      margin: 40px auto;
+      background-color: #161b22;
+      padding: 30px;
+      border-radius: 12px;
+      box-shadow: 0 4px 20px rgba(0, 0, 0, 0.3);
+      border: 1px solid #30363d;
+    }
+
+    h1,
+    h2,
+    h3 {
+      color: #58a6ff;
+    }
+
+    p,
+    ul {
+      line-height: 1.6;
+    }
+
+    ul {
+      padding-left: 20px;
+    }
+
+    /* button styles */
+    a.button {
+      display: inline-block;
+      margin: 15px 10px 0 0;
+      padding: 12px 20px;
+      background: linear-gradient(135deg, #58a6ff, #a371f7);
+      color: white;
+      text-decoration: none;
+      border-radius: 8px;
+      font-weight: bold;
+      transition: transform 0.2s ease, box-shadow 0.2s ease;
+      box-shadow: 0 4px 14px rgba(88, 166, 255, 0.4);
+    }
+
+    a.button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(88, 166, 255, 0.6);
+    }
+
+    .button-container {
+      display: flex;
+      justify-content: center;
+      gap: 25px;
+      margin-top: 20px;
+    }
+
+    footer {
+      text-align: center;
+      font-size: 0.85em;
+      color: #8b949e;
+      margin: 40px 0 20px;
+    }
+
+    /* link colors */
+    a {
+      color: #58a6ff;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <h1>CWIE Symbolic Processor</h1>
+    <p>A symbolic processing engine for handling complex logical operations</p>
+  </header>
+  <main>
+    {{ readme_content|safe }}
+    <div class="button-container">
+      <a class="button" href="/docs" target="_blank">🚀 API 테스트하기</a>
+      <a class="button" href="https://huggingface.co/spaces/m97j/symbolic-processor/blob/main/README.md"
+        target="_blank">📄 상세 문서 보기</a>
+    </div>
+  </main>
+  <footer>
+    &copy; 2025-2026 CWIE Project
+  </footer>
+</body>
+
 </html>

@@ -1,8 +1,8 @@
 ---
-title: CWIE Symbolic Processing Server
+title: CWIE Symbolic Processor
 emoji: 👀
 colorFrom: green
-colorTo: green
+colorTo: blue
 sdk: docker
 pinned: false
 license: mit
@@ -116,15 +116,16 @@ symbolic/
 ---
 
 <!-- app-tab:start -->
-# 👀 CWIE Symbolic Processing Server
+# 👀 CWIE Symbolic Processor
 
-게임 내 환경과 CWIE Core Inference Server와 상호작용하는 API 서버입니다.  
-최소 입력만으로도 동작하며, RAG 기반 문서와 NPC 메타데이터를 활용해 대화를 보강합니다.
+게임 내 환경과 상호작용하는 API 서버입니다.  
+Neuro-Symbolic System에서 Symbolic Processing(Pre/Post Processing)을 담당합니다.  
 
 ### ⚙️ 주요 기능
 - 게임 서버 요청 수신 및 전처리
 - 조건 판정 후 모델 추론 방식 결정 [delta, flag head 사용 여부 결정]
-- RAG 기반 세계관·상황·NPC 성격 반영
-- 응답 후처리 및 JSON 표준 응답 반환
+- Neuro Engine과 API 통신을 통해 Core 모델 추론 진행
+- 모델 응답 후처리 및 JSON 표준 응답 반환
+- 전, 후처리, 조건 검증시 RAG 기반 세계관·상황별 규칙·NPC 성격 반영
 <!-- app-tab:end -->
 ---
