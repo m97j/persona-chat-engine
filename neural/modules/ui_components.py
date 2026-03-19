@@ -2,7 +2,7 @@ import gradio as gr
 
 from modules.case_loader import load_case, run_case
 
-# test case names
+# test case names (for dropdown display)
 CASE_NAMES = [
     "폐공장에서 NPC와 대화하는 장면",
     "마을 대장장이와 무기 수리에 대해 대화하는 장면",
