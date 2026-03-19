@@ -1,9 +1,10 @@
-from typing import Dict, Any
+from typing import Any, Dict
+
 
 def build_webtest_prompt(npc_id: str, npc_location: str, player_utt: str) -> str:
     """
-    Web Test 전용: 최소 입력값(NPC ID, Location, Player 발화)으로
-    모델 학습 포맷에 맞는 prompt 문자열을 생성.
+    Web Test Only: Generate a prompt string suitable for the model training format 
+    using minimum input values (NPC ID, Location, Player utterance).
     """
     pre = {
         "npc_id": npc_id,
@@ -29,15 +30,15 @@ def build_webtest_prompt(npc_id: str, npc_location: str, player_utt: str) -> str
 
 def _assemble_prompt_for_model(pre: Dict[str, Any]) -> str:
     """
-    Web Test 전용 내부 함수:
-    pre dict → 모델 입력 포맷 문자열(<SYS>~<NPC>)
+    Web Test Only: Internal function for assembling the prompt string for the model.
+    pre dict → Model input format string (<SYS>~<NPC>)
     """
 
     tags = pre.get("tags", {})
     ps = pre.get("player_state", {})
     rag_docs = pre.get("rag_main_docs", [])
 
-    # RAG 문서 분리
+    # RAG documents are categorized into LORE and DESCRIPTION based on their content.
     lore_text = ""
     desc_text = ""
     for doc in rag_docs:

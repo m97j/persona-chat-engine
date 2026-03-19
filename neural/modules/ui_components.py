@@ -1,5 +1,6 @@
 import gradio as gr
-from .case_loader import load_case, run_case
+
+from modules.case_loader import load_case, run_case
 
 # test case names
 CASE_NAMES = [

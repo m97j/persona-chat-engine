@@ -1,7 +1,10 @@
-import os, json, torch
+import json
+import os
+
+import torch
 import torch.nn as nn
-from transformers import AutoTokenizer, AutoModelForCausalLM
 from config import DEVICE, HF_TOKEN
+from transformers import AutoModelForCausalLM, AutoTokenizer
 
 SPECIALS = ["<SYS>", "<CTX>", "<PLAYER>", "<NPC>", "<STATE>", "<RAG>", "<PLAYER_STATE>"]
 
@@ -13,18 +16,18 @@ def get_current_branch():
 
 class ModelWrapper:
     def __init__(self):
-        # Flags 정보
+        # Flags info
         flags_path = os.path.join(os.path.dirname(__file__), "flags.json")
         self.flags_order = json.load(open(flags_path, encoding="utf-8"))["ALL_FLAGS"]
         self.num_flags = len(self.flags_order)
 
         branch = get_current_branch()
 
-        # 1) 토크나이저 (학습 당시 vocab + SPECIALS)
+        # 1) Tokenizer (vocab + SPECIALS at the time of training LoRA)
         self.tokenizer = AutoTokenizer.from_pretrained(
-            "m97j/npc_LoRA-fps",          # 병합된 모델이 올라간 repo
+            "m97j/npc_LoRA-fps",
             revision=branch,
-            subfolder="testcase_output", # 병합된 모델이 올라간 경로
+            subfolder="testcase_output",
             use_fast=True,
             token=HF_TOKEN,
             trust_remote_code=True
@@ -34,24 +37,25 @@ class ModelWrapper:
         self.tokenizer.padding_side = "right"
         self.tokenizer.add_special_tokens({"additional_special_tokens": SPECIALS})
 
-        # 2) 병합된 모델 로드 (샤드 자동 인식)
+        # 2) Base model (LoRA model with merged weights, but without custom heads)
         self.model = AutoModelForCausalLM.from_pretrained(
-            "m97j/npc_LoRA-fps",          # 병합된 모델이 올라간 repo
+            "m97j/npc_LoRA-fps",
             revision=branch,
-            subfolder="testcase_output", # 병합된 모델이 올라간 경로
-            device_map=None,              # 오프로딩 비활성화
+            subfolder="testcase_output",
+            device_map=None,
             low_cpu_mem_usage=False,
             trust_remote_code=True,
             token=HF_TOKEN
         )
 
-        # 3) 커스텀 헤드 추가
+        # 3) add custom heads (delta, flag, flag_threshold) - architecture only, weights will be loaded separately
         hidden_size = self.model.config.hidden_size
         self.model.delta_head = nn.Linear(hidden_size, 2).to(DEVICE)
         self.model.flag_head = nn.Linear(hidden_size, self.num_flags).to(DEVICE)
         self.model.flag_threshold_head = nn.Linear(hidden_size, self.num_flags).to(DEVICE)
 
-        # 4) 커스텀 헤드 가중치 로드
+        # 4) Load custom head weights separately (if available)
+        #  - this is necessary because the LoRA merging process may not include these heads, and they might be trained separately.
         for head_name, file_name in [
             ("delta_head", "delta_head.pt"),
             ("flag_head", "flag_head.pt"),
@@ -65,7 +69,7 @@ class ModelWrapper:
             except Exception as e:
                 print(f"[WARN] Failed to load {file_name}: {e}")
 
-        # 5) 디바이스 배치
+        # 5) Move model to device and set to eval mode
         self.model.to(DEVICE)
         self.model.eval()
 

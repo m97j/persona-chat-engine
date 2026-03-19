@@ -1,15 +1,16 @@
-import os, json
-from webtest_prompt import build_webtest_prompt
-from inference import run_inference
+import json
+import os
 
-BASE_DIR = os.path.dirname(os.path.dirname(__file__))  # modules/ 상위 폴더
+from inference import run_inference
+from webtest_prompt import build_webtest_prompt
+
+BASE_DIR = os.path.dirname(os.path.dirname(__file__))
 TEST_CASES_PATH = os.path.join(BASE_DIR, "test_cases.json")
 
 with open(TEST_CASES_PATH, "r", encoding="utf-8") as f:
     TEST_CASES = json.load(f)
 
 def get_case_names():
-    # description은 input 안에 있음
     return [f"{i+1}. {c['input'].get('description','')}" for i, c in enumerate(TEST_CASES)]
 
 def load_cases():

@@ -1,9 +1,10 @@
 import torch
-from config import DEVICE, MAX_LENGTH, GEN_MAX_NEW_TOKENS, GEN_TEMPERATURE, GEN_TOP_P
+from config import (DEVICE, GEN_MAX_NEW_TOKENS, GEN_TEMPERATURE, GEN_TOP_P,
+                    MAX_LENGTH)
 from model_loader import ModelWrapper
 
-# 전역 로드 (서버 시작 시 1회)
-wrapper = ModelWrapper()  # 기본은 latest 브랜치
+# Global Load (once at server start)
+wrapper = ModelWrapper()
 tokenizer, model, flags_order = wrapper.get()
 
 GEN_PARAMS = {
@@ -18,17 +19,17 @@ def run_inference(prompt: str):
     inputs = tokenizer(prompt, return_tensors="pt", truncation=True, max_length=MAX_LENGTH).to(DEVICE)
 
     with torch.no_grad():
-        # 텍스트 생성
+        # language generation
         gen_ids = model.generate(**inputs, **GEN_PARAMS)
         generated_text = tokenizer.decode(
             gen_ids[0][inputs["input_ids"].shape[1]:], skip_special_tokens=True
         )
 
-        # 히든 스테이트 추출
+        # hidden state extraction
         outputs = model(**inputs, output_hidden_states=True)
         h = outputs.hidden_states[-1]
 
-        # <STATE> 토큰 위치 풀링
+        # <STATE> token position pooling
         STATE_ID = tokenizer.convert_tokens_to_ids("<STATE>")
         ids = inputs["input_ids"]
         mask = (ids == STATE_ID).unsqueeze(-1)
@@ -38,7 +39,7 @@ def run_inference(prompt: str):
         else:
             pooled = h[:, -1, :]
 
-        # 커스텀 헤드 추론
+        # delta, flag, flag_threshold prediction
         delta_pred = torch.tanh(model.delta_head(pooled))[0].cpu().tolist()
         flag_prob = torch.sigmoid(model.flag_head(pooled))[0].cpu().tolist()
         flag_thr = torch.sigmoid(model.flag_threshold_head(pooled))[0].cpu().tolist()
@@ -58,6 +59,6 @@ def run_inference(prompt: str):
 
 def reload_model(branch="latest"):
     global wrapper, tokenizer, model, flags_order
-    wrapper = ModelWrapper(branch=branch)  # branch 인자로 latest 전달
+    wrapper = ModelWrapper(branch=branch)
     tokenizer, model, flags_order = wrapper.get()
     print(f"Model reloaded from branch: {branch}")

@@ -3,15 +3,15 @@ from modules.ui_components import build_ui
 from webtest_prompt import build_webtest_prompt
 
 
-# Web Test UI 호출 함수
+# Web Test UI Call Function
 def gradio_infer(npc_id, npc_location, player_utt):
     prompt = build_webtest_prompt(npc_id, npc_location, player_utt)
     result = run_inference(prompt)
     return result["npc_output_text"], result["deltas"], result["flags_prob"]
 
-# ping: 상태 확인 및 깨우기
+# ping: Check status and wake up
 def ping():
-    # 모델이 로드되어 있는지 확인, 없으면 로드
+    # Check if model is loaded, load if not
     global wrapper, tokenizer, model, flags_order
     if 'model' not in globals() or model is None:
         from model_loader import ModelWrapper
